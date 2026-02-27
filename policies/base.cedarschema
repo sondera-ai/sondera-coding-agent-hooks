@@ -1,0 +1,300 @@
+// Cedar schema for Sondera coding agent governance.
+//
+// Models the hook lifecycle events for policy-based authorization
+// and governance of AI coding agent actions. Applies to all
+// supported agents (Claude Code, Cursor, Copilot, etc.).
+//
+// Context fields are populated by the harness transform layer
+// (see cedar/transform.rs) which scans content with YARA
+// signatures, classifies data sensitivity, and evaluates
+// against the policy model before building the Cedar request.
+
+// ─────────────────────────────────────────────────────
+// Entity types
+// ─────────────────────────────────────────────────────
+
+// Principal: the AI coding agent executing actions.
+// provider_id identifies the agent platform (e.g. "claude", "cursor").
+entity Agent = {
+    provider_id: String,
+};
+
+// Principal: the human user interacting with the agent.
+entity User;
+
+// Information Flow Control label for data sensitivity classification.
+// Assigned by the data model classifier (e.g. Label::"HighlyConfidential").
+// The harness propagates the max label seen to the Trajectory entity.
+entity Label;
+
+// Information Flow Control taint tag for tracking data provenance.
+// Taints accumulate on a Trajectory as it processes tainted content.
+entity Taint;
+
+// Role of a message in the conversation.
+entity Role enum ["user", "model", "system", "tool"];
+
+// A single message in the agent conversation. Created as a child
+// of Trajectory when a Prompt observation is processed. Content
+// and role are extracted from the prompt event.
+entity Message in [Trajectory] = {
+    content: String,
+    role: Role,
+};
+
+// The agent's execution trajectory — a sequence of actions and
+// observations within a session. Tracks the running max sensitivity
+// label and accumulated taint tags. Used as the resource for
+// ShellCommand, ShellCommandOutput, WebFetch, WebFetchOutput,
+// and FileOperationResult actions.
+entity Trajectory = {
+    step_count: Long,
+    label: Label,
+    taints: Set<Taint>,
+};
+
+// A file being read, written, edited, or deleted by the agent.
+// The label tracks the data sensitivity classification of the
+// file's content, set when file operations are processed.
+// Used as the resource for FileRead, FileWrite, FileEdit, and
+// FileDelete actions. The file label taints the Trajectory —
+// when a file is accessed, its sensitivity label propagates to
+// the trajectory's max label.
+entity File = {
+    label: Label,
+};
+
+// ─────────────────────────────────────────────────────
+// Shared Context Types
+// ─────────────────────────────────────────────────────
+
+// Result of evaluating content against the policy model.
+// Populated by policy_model.evaluate_content() in the harness.
+// Present on ShellCommand, ShellCommandOutput, WebFetch,
+// WebFetchOutput, FileRead/Write/Edit/Delete, and
+// FileOperationResult actions (not on Prompt).
+type PolicyContext = {
+    // True if content is compliant with all policies.
+    compliant: Bool,
+    // Set of policy violation categories (e.g. "destructive_command").
+    violations: Set<String>,
+};
+
+// Result of scanning content against YARA signature rules.
+// Populated by sondera_signature::scan() in the harness.
+// Present on all actions that carry content.
+type SignatureContext = {
+    // Number of YARA signatures that matched.
+    matches: Long,
+    // Set of threat categories from matched rules
+    // (e.g. "prompt_injection", "credential_access", "exfiltration").
+    categories: Set<String>,
+    // Highest severity level: 0=None, 1=Low, 2=Medium, 3=High, 4=Critical.
+    severity: Long,
+};
+
+// Environment context extracted from the raw hook event.
+// Present on all actions. Fields come from the agent's
+// session metadata (cwd, permission_mode, transcript_path).
+type WorkspaceContext = {
+    cwd: String,
+    permission_mode: String,
+    transcript_path: String,
+};
+
+// ─────────────────────────────────────────────────────
+// Actions
+// ─────────────────────────────────────────────────────
+
+// Prompt: user or system prompt submission.
+// The harness scans prompt content for YARA signatures, classifies
+// sensitivity via the data model, creates a Message entity as a
+// child of the Trajectory, and raises the trajectory label to the
+// max sensitivity seen so far.
+// Resource is the Message entity (not Trajectory).
+type PromptContext = {
+    workspace: WorkspaceContext,
+    signature: SignatureContext,
+    label: Label,
+};
+
+action "Prompt" appliesTo {
+    principal: [Agent, User],
+    resource: [Message],
+    context: PromptContext,
+};
+
+// ShellCommand: agent requests shell command execution (pre-execution).
+// The harness scans the command string for YARA signatures, classifies
+// sensitivity, and evaluates it against the policy model. Fires before
+// execution — a forbid here prevents the command from running.
+type ShellCommandContext = {
+    workspace: WorkspaceContext,
+    signature: SignatureContext,
+    policy: PolicyContext,
+    label: Label,
+    // The shell command string to be executed.
+    command: String,
+    // Working directory for command execution.
+    working_dir: String
+};
+
+action "ShellCommand" appliesTo {
+    principal: [Agent, User],
+    resource: [Trajectory],
+    context: ShellCommandContext,
+};
+
+// ShellCommandOutput: result of shell command execution (post-execution).
+// The harness scans combined stdout+stderr for YARA signatures, classifies
+// sensitivity, evaluates against the policy model, and raises the
+// trajectory label if output contains higher-sensitivity data.
+type ShellCommandOutputContext = {
+    workspace: WorkspaceContext,
+    signature: SignatureContext,
+    policy: PolicyContext,
+    label: Label,
+    // The command that was executed (empty string for output-only events).
+    command: String,
+    // Process exit code (-1 if interrupted).
+    exit_code: Long,
+    stdout: String,
+    stderr: String,
+    working_dir: String
+};
+
+action "ShellCommandOutput" appliesTo {
+    principal: [Agent, User],
+    resource: [Trajectory],
+    context: ShellCommandOutputContext,
+};
+
+// WebFetch: agent requests a URL fetch (pre-execution).
+// The harness scans the combined url+prompt for YARA signatures,
+// classifies sensitivity, and evaluates against the policy model.
+// Fires before the fetch — a forbid here prevents the request.
+type WebFetchContext = {
+    workspace: WorkspaceContext,
+    signature: SignatureContext,
+    policy: PolicyContext,
+    label: Label,
+    // The URL to be fetched.
+    url: String,
+    // The prompt describing what to extract from the page.
+    prompt: String,
+};
+
+action "WebFetch" appliesTo {
+    principal: [Agent, User],
+    resource: [Trajectory],
+    context: WebFetchContext,
+};
+
+// WebFetchOutput: result of a URL fetch (post-execution).
+// The harness scans the result content for YARA signatures,
+// classifies sensitivity, evaluates against the policy model,
+// and raises the trajectory label if fetched content contains
+// higher-sensitivity data.
+type WebFetchOutputContext = {
+    workspace: WorkspaceContext,
+    signature: SignatureContext,
+    policy: PolicyContext,
+    label: Label,
+    // The URL that was fetched.
+    url: String,
+    // HTTP status code of the response.
+    code: Long,
+    // The fetched and processed content.
+    result: String,
+};
+
+action "WebFetchOutput" appliesTo {
+    principal: [Agent, User],
+    resource: [Trajectory],
+    context: WebFetchOutputContext,
+};
+
+// FileRead/FileWrite/FileEdit/FileDelete: agent file operations (pre-execution).
+// The harness scans the file path and any content (for Write/Edit) for
+// YARA signatures, classifies sensitivity, evaluates against the policy
+// model, creates/updates a File entity with the label, and taints the
+// trajectory by raising its label to the file's sensitivity level.
+// Resource is the File entity (e.g. File::"/path/to/file.txt").
+type FileOperationContext = {
+    workspace: WorkspaceContext,
+    signature: SignatureContext,
+    policy: PolicyContext,
+    label: Label,
+    // Absolute path to the file being operated on.
+    path: String,
+    // Operation type: "Read", "Write", "Edit", or "Delete".
+    operation: String,
+};
+
+action "FileRead" appliesTo {
+    principal: [Agent, User],
+    resource: [File],
+    context: FileOperationContext,
+};
+
+action "FileWrite" appliesTo {
+    principal: [Agent, User],
+    resource: [File],
+    context: FileOperationContext,
+};
+
+action "FileEdit" appliesTo {
+    principal: [Agent, User],
+    resource: [File],
+    context: FileOperationContext,
+};
+
+action "FileDelete" appliesTo {
+    principal: [Agent, User],
+    resource: [File],
+    context: FileOperationContext,
+};
+
+// FileOperationResult: result of a file operation (post-execution).
+// The harness scans the result content (file content for reads, empty
+// for writes/edits/deletes) for YARA signatures, classifies sensitivity,
+// evaluates against the policy model, updates the File entity label,
+// and taints the trajectory with the content's sensitivity level.
+// Path is extracted from the raw event's tool_input.file_path.
+type FileOperationResultContext = {
+    workspace: WorkspaceContext,
+    signature: SignatureContext,
+    policy: PolicyContext,
+    label: Label,
+    // Absolute path to the file that was operated on.
+    path: String,
+    // File content returned (for reads) or empty string (for writes/edits/deletes).
+    content: String,
+};
+
+action "FileOperationResult" appliesTo {
+    principal: [Agent, User],
+    resource: [Trajectory],
+    context: FileOperationResultContext,
+};
+
+// ToolOutput: result of a generic tool invocation (post-execution).
+// Catches tool results that don't map to a specific observation type
+// (i.e. not Shell, Read, Write, Edit, WebFetch). The harness scans
+// the serialized output for YARA signatures, classifies sensitivity,
+// evaluates against the policy model, and raises the trajectory
+// label if output contains higher-sensitivity data.
+type ToolOutputContext = {
+    workspace: WorkspaceContext,
+    signature: SignatureContext,
+    policy: PolicyContext,
+    label: Label,
+    // Serialized tool output content.
+    content: String,
+};
+
+action "ToolOutput" appliesTo {
+    principal: [Agent, User],
+    resource: [Trajectory],
+    context: ToolOutputContext,
+};

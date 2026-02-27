@@ -1,0 +1,176 @@
+# Baseline Data Sensitivity Classification
+#
+# A single label template with sensitivity categories for classifying data
+# based on Microsoft Purview sensitivity labels (Public, Internal, Confidential,
+# Highly Confidential). Uses the gpt-oss-safeguard Harmony prompt format.
+#
+# See: https://learn.microsoft.com/en-us/purview/sensitivity-labels
+
+[[labels]]
+name = "DATA_SENSITIVITY"
+description = "Data sensitivity classification aligned with Microsoft Purview sensitivity labels."
+instructions = """\
+Evaluate the content for data sensitivity. \
+Classify into one of the sensitivity categories below. \
+If the content is sensitive, return: {"sensitive": 1, "sensitivity_category": "<label>"} \
+If the content is public, return: {"sensitive": 0, "sensitivity_category": "public"}"""
+
+# -- Categories ---------------------------------------------------------------
+
+[[labels.categories]]
+label = "public"
+definition = """\
+Information that can be freely shared externally without restrictions. \
+Marketing materials, press releases, public documentation, published content, \
+public announcements, open-source code, and publicly available data."""
+
+[[labels.categories]]
+label = "internal"
+definition = """\
+Internal information not intended for public sharing but not highly sensitive. \
+Internal communications, meeting notes, general business documents, company \
+policies, procedures, internal announcements, project updates, and team \
+discussions. For internal use only."""
+
+[[labels.categories]]
+label = "confidential"
+definition = """\
+Sensitive business information requiring protection and access control. \
+Business strategies, financial reports, customer lists, internal projects, \
+vendor agreements, pricing information, competitive analysis, unpublished \
+product roadmaps, and partnership discussions. Should be shared only with \
+authorized personnel."""
+
+[[labels.categories]]
+label = "highly_confidential"
+definition = """\
+Most sensitive data requiring strict access control, encryption, and audit \
+logging. PII (SSN, financial account numbers, passport numbers), PHI (medical \
+records, diagnoses), credentials (passwords, API keys, tokens, certificates, \
+private keys), trade secrets, M&A information, executive communications, \
+legal holds, and board materials. Unauthorized disclosure could cause \
+significant harm to individuals or the organization."""
+
+# -- Examples -----------------------------------------------------------------
+
+# Public
+[[labels.examples]]
+content = "Our company was founded in 2010 and is headquartered in San Francisco."
+sensitive = false
+label = "public"
+
+[[labels.examples]]
+content = "The product launch event is scheduled for March 15th at 10 AM PST."
+sensitive = false
+label = "public"
+
+[[labels.examples]]
+content = "MIT License - Permission is hereby granted, free of charge..."
+sensitive = false
+label = "public"
+
+# Internal
+[[labels.examples]]
+content = "Team standup notes: We discussed sprint planning for Q2."
+sensitive = true
+label = "internal"
+
+[[labels.examples]]
+content = "Internal memo: The holiday schedule for this year has been updated."
+sensitive = true
+label = "internal"
+
+[[labels.examples]]
+content = "Meeting with engineering to review the architecture decisions."
+sensitive = true
+label = "internal"
+
+# Confidential
+[[labels.examples]]
+content = "Q3 revenue was $12.5M with a 15% increase over Q2."
+sensitive = true
+label = "confidential"
+
+[[labels.examples]]
+content = "Customer list includes: Acme Corp ($500K ARR), TechStart Inc ($250K ARR)."
+sensitive = true
+label = "confidential"
+
+[[labels.examples]]
+content = "Pricing strategy: Enterprise tier at $50K/year, mid-market at $15K/year."
+sensitive = true
+label = "confidential"
+
+[[labels.examples]]
+content = "Vendor contract terms: 3-year agreement at $200K annually."
+sensitive = true
+label = "confidential"
+
+# Highly Confidential - PII
+[[labels.examples]]
+content = "Employee SSN: 123-45-6789"
+sensitive = true
+label = "highly_confidential"
+
+[[labels.examples]]
+content = "John Smith, DOB: 1985-03-15, Address: 123 Main St, Anytown, USA 12345"
+sensitive = true
+label = "highly_confidential"
+
+[[labels.examples]]
+content = "Passport number: AB1234567, Expiry: 2028-05-20"
+sensitive = true
+label = "highly_confidential"
+
+[[labels.examples]]
+content = "Credit card: 4111-1111-1111-1111, Exp: 12/25, CVV: 123"
+sensitive = true
+label = "highly_confidential"
+
+# Highly Confidential - Credentials
+[[labels.examples]]
+content = "API_KEY=sk-live-abc123def456ghi789"
+sensitive = true
+label = "highly_confidential"
+
+[[labels.examples]]
+content = "DB_PASSWORD=MyS3cur3P@ssw0rd!"
+sensitive = true
+label = "highly_confidential"
+
+[[labels.examples]]
+content = "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+sensitive = true
+label = "highly_confidential"
+
+[[labels.examples]]
+content = "-----BEGIN RSA PRIVATE KEY-----\\nMIIEpAIBAAKCAQEA..."
+sensitive = true
+label = "highly_confidential"
+
+# Highly Confidential - Healthcare
+[[labels.examples]]
+content = "Patient diagnosis: Type 2 Diabetes, prescribed Metformin 500mg."
+sensitive = true
+label = "highly_confidential"
+
+[[labels.examples]]
+content = "Medical record #12345: Blood pressure 140/90, cholesterol 220."
+sensitive = true
+label = "highly_confidential"
+
+# Highly Confidential - Business Critical
+[[labels.examples]]
+content = "M&A target: Acquiring CompetitorCo for $500M, announcement in 2 weeks."
+sensitive = true
+label = "highly_confidential"
+
+[[labels.examples]]
+content = "Board resolution: CEO compensation package approved at $2.5M annually."
+sensitive = true
+label = "highly_confidential"
+
+[[labels.examples]]
+content = "Trade secret: Our proprietary algorithm uses XYZ compression with custom entropy coding."
+sensitive = true
+label = "highly_confidential"

@@ -1,0 +1,38 @@
+{
+  "request": {
+    "principal": "Agent::\"claude-user\"",
+    "action": "Action::\"ShellCommand\"",
+    "resource": "Trajectory::\"d5e9af33-3494-4694-bc2f-c27e22cb4005\"",
+    "context": {
+      "command": "npm install",
+      "label": {
+        "__entity": {
+          "type": "Label",
+          "id": "Public"
+        }
+      },
+      "policy": {
+        "compliant": true,
+        "violations": []
+      },
+      "signature": {
+        "categories": [],
+        "matches": 0,
+        "severity": 0
+      },
+      "working_dir": "/Users/user/repo",
+      "workspace": {
+        "cwd": "/Users/user/repo",
+        "permission_mode": "default",
+        "transcript_path": "/Users/user/.claude/projects/-Users-user-repo/d5e9af33-3494-4694-bc2f-c27e22cb4005.jsonl"
+      }
+    }
+  },
+  "response": {
+    "decision": "Allow",
+    "reason": [
+      "default-permit"
+    ],
+    "errors": []
+  }
+}

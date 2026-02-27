@@ -1,0 +1,21 @@
+[package]
+name = "sondera-information-flow-control"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Information flow control with LLM-based data classification for AI agent governance"
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+ollama-rs = { version = "0.3", features = [] }
+schemars = { version = "1.2", features = ["preserve_order"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+strum = { version = "0.27.2", features = ["derive"] }
+strum_macros = "0.27.2"
+thiserror = "2"
+toml = "0.8"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

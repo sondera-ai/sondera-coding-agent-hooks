@@ -1,0 +1,14 @@
+[package]
+name = "sondera-signature"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "YARA-X signature scanning guardrail for AI agent governance"
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+yara-x = "1"
+include_dir = "0.7"
+tracing = "0.1"
+serde = { version = "1", features = ["derive"] }

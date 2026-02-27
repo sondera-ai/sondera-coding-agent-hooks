@@ -1,0 +1,49 @@
+[package]
+name = "sondera-harness"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Harness APIs for Agent Scaffolds"
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+name = "sondera_harness"
+crate-type = ["rlib"]
+
+[[bin]]
+name = "sondera-harness-server"
+path = "src/bin/server.rs"
+
+[dependencies]
+cedar-policy = { version = "4" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+strum_macros = "0.27.2"
+strum = { version = "0.27.2", features = ["derive"] }
+anyhow = "1.0"
+dirs = "6"
+fjall = "3"
+turso = "0.4"
+ollama-rs = { version = "0.3", features = [] }
+schemars = { version = "1.2", features = ["preserve_order"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync"] }
+thiserror = "2"
+tarpc = { version = "0.37", features = ["tokio1", "serde1", "serde-transport", "unix"] }
+tokio-serde = { version = "0.9", features = ["json"] }
+futures = "0.3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4.5", features = ["derive"] }
+shlex = "1"
+
+# Guardrail crates
+sondera-information-flow-control = { path = "../guardrails/ifc" }
+sondera-policy = { path = "../guardrails/policy" }
+sondera-signature = { path = "../guardrails/signature" }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "macros"] }

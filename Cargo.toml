@@ -1,0 +1,36 @@
+[workspace]
+resolver = "2"
+members = [
+    "apps/claude",
+    "apps/copilot",
+    "apps/cursor",
+    "apps/gemini",
+    "crates/guardrails/ifc",
+    "crates/guardrails/policy",
+    "crates/guardrails/signature",
+    "crates/harness",
+    "crates/common",
+    "crates/mcp",
+]
+
+[workspace.package]
+authors = ["Sondera Team"]
+repository = "https://github.com/sondera-ai/sondera-coding-agent-hooks"
+
+[workspace.dependencies]
+sondera-harness = { path = "crates/harness" }
+sondera-hooks-common = { path = "crates/common" }
+sondera-mcp = { path = "crates/mcp" }
+sondera-signature = { path = "crates/guardrails/signature" }
+sondera-policy = { path = "crates/guardrails/policy" }
+sondera-information-flow-control = { path = "crates/guardrails/ifc" }
+
+[profile.release]
+lto = true
+
+[profile.ci]
+inherits = "release"
+lto = false           # Disable link-time optimization for faster CI builds
+opt-level = 1         # Basic optimization (not full O3)
+incremental = true    # Enable incremental compilation
+codegen-units = 16    # Parallel codegen for sondera-rs runner

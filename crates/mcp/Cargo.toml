@@ -1,0 +1,31 @@
+[package]
+name = "sondera-mcp"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "MCP server for Coding Agent Policy Generation"
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+name = "sondera_mcp"
+crate-type = ["rlib"]
+
+[[bin]]
+name = "cedar-mcp"
+path = "src/main.rs"
+
+[dependencies]
+sondera-signature = { workspace = true }
+sondera-information-flow-control = { workspace = true }
+sondera-policy = { workspace = true }
+cedar-policy = { version = "4" }
+turbomcp = { version = "2", features = ["full"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("http", "websocket", "tcp", "unix"))'] }

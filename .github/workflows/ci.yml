@@ -1,0 +1,173 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: lint
+
+      - name: Rust format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-features -- -D warnings
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test
+
+      - name: Run cargo test
+        run: cargo test --workspace
+
+  security:
+    name: Security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install Security Tools
+        run: cargo binstall cargo-deny cargo-audit -y
+
+      - name: Deny Check
+        run: cargo deny check
+
+      - name: Audit
+        run: cargo audit --deny warnings --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2025-0141 --ignore RUSTSEC-2026-0006 --ignore RUSTSEC-2024-0436 --ignore RUSTSEC-2025-0134
+
+
+  build-apps:
+    name: Build app binaries (${{ matrix.os }} - ${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/apps-v')
+    needs: [ test, lint, security ]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: apps-${{ matrix.target }}
+
+      - name: Build binaries (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cargo build --release --target ${{ matrix.target }} \
+            -p sondera-claude \
+            -p sondera-copilot \
+            -p sondera-cursor \
+            -p sondera-gemini
+
+      - name: Build binaries (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo build --release --target ${{ matrix.target }} `
+            -p sondera-claude `
+            -p sondera-copilot `
+            -p sondera-cursor `
+            -p sondera-gemini
+
+      - name: Create archive (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          tar -czvf sondera-${{ matrix.target }}.tar.gz \
+            -C target/${{ matrix.target }}/release \
+            sondera-claude sondera-copilot sondera-cursor sondera-gemini
+
+      - name: Create archive (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive `
+            -Path target/${{ matrix.target }}/release/sondera-claude.exe, `
+                  target/${{ matrix.target }}/release/sondera-copilot.exe, `
+                  target/${{ matrix.target }}/release/sondera-cursor.exe, `
+                  target/${{ matrix.target }}/release/sondera-gemini.exe `
+            -DestinationPath sondera-${{ matrix.target }}.zip
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.target }}
+          path: sondera-${{ matrix.target }}.*
+
+  release-apps:
+    name: Create GitHub Release for Apps
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/apps-v')
+    needs: [ build-apps ]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: binaries-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create or Update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest' }}
+          name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'Latest Build' }}
+          prerelease: ${{ github.ref == 'refs/heads/main' }}
+          files: dist/*
+          generate_release_notes: true
