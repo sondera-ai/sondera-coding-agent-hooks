@@ -16,6 +16,21 @@ and [Gemini CLI](https://geminicli.com/docs/hooks/).
 
 ## Getting Started
 
+### Prerequisites
+
+The YARA signature engine and Cedar policies work without any external
+dependencies. The LLM-based classifiers (data sensitivity and secure code
+policy) require [Ollama](https://ollama.com/) with the `gpt-oss-safeguard-20b`
+model:
+
+```bash
+# Install Ollama — see https://ollama.com/download for other platforms
+brew install ollama
+
+# Pull the model (~12 GB)
+ollama pull gpt-oss-safeguard-20b
+```
+
 ### 1. Start the harness server
 
 The harness server loads Cedar policies and listens on a Unix socket for
