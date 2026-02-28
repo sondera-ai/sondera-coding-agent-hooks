@@ -89,8 +89,6 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - os: macos-latest
             target: aarch64-apple-darwin
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
 
     steps:
       - uses: actions/checkout@v4
@@ -105,8 +103,7 @@ jobs:
         with:
           shared-key: apps-${{ matrix.target }}
 
-      - name: Build binaries (Unix)
-        if: runner.os != 'Windows'
+      - name: Build binaries
         run: |
           cargo build --release --target ${{ matrix.target }} \
             -p sondera-claude \
@@ -114,33 +111,11 @@ jobs:
             -p sondera-cursor \
             -p sondera-gemini
 
-      - name: Build binaries (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          cargo build --release --target ${{ matrix.target }} `
-            -p sondera-claude `
-            -p sondera-copilot `
-            -p sondera-cursor `
-            -p sondera-gemini
-
-      - name: Create archive (Unix)
-        if: runner.os != 'Windows'
+      - name: Create archive
         run: |
           tar -czvf sondera-${{ matrix.target }}.tar.gz \
             -C target/${{ matrix.target }}/release \
             sondera-claude sondera-copilot sondera-cursor sondera-gemini
-
-      - name: Create archive (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Compress-Archive `
-            -Path target/${{ matrix.target }}/release/sondera-claude.exe, `
-                  target/${{ matrix.target }}/release/sondera-copilot.exe, `
-                  target/${{ matrix.target }}/release/sondera-cursor.exe, `
-                  target/${{ matrix.target }}/release/sondera-gemini.exe `
-            -DestinationPath sondera-${{ matrix.target }}.zip
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
