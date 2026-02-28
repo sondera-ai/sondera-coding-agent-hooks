@@ -109,13 +109,14 @@ jobs:
             -p sondera-claude \
             -p sondera-copilot \
             -p sondera-cursor \
-            -p sondera-gemini
+            -p sondera-gemini \
+            -p sondera-harness
 
       - name: Create archive
         run: |
           tar -czvf sondera-${{ matrix.target }}.tar.gz \
             -C target/${{ matrix.target }}/release \
-            sondera-claude sondera-copilot sondera-cursor sondera-gemini
+            sondera-claude sondera-copilot sondera-cursor sondera-gemini sondera-harness-server
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
