@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use strum_macros::{Display, EnumString};
 use thiserror::Error;
+use tracing::instrument;
 
 pub use policy::{PolicyClassification, PolicyTemplate, PolicyViolation};
 
@@ -251,6 +252,7 @@ impl PolicyModel {
     ///
     /// Each policy is evaluated independently. A violation is recorded when
     /// `violation == 1` in the model's response.
+    #[instrument(skip(self, content), fields(content_len = content.len()))]
     pub async fn evaluate_content(
         &self,
         content: &str,

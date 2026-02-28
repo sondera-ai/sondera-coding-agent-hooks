@@ -18,7 +18,7 @@ use sondera_information_flow_control::DataModel;
 use sondera_policy::PolicyModel;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use tracing::{debug, warn};
+use tracing::{debug, instrument, warn};
 
 pub struct CedarPolicyHarness {
     authorizer: Authorizer,
@@ -234,6 +234,14 @@ impl CedarPolicyHarness {
 }
 
 impl Harness for CedarPolicyHarness {
+    #[instrument(
+        skip(self, event),
+        fields(
+            trajectory_id = %event.trajectory_id,
+            event_id = %event.event_id,
+            agent = %event.agent.id,
+        )
+    )]
     async fn adjudicate(&self, event: Event) -> Result<Adjudicated> {
         debug!("Trajectory Event: {:?}", event);
         // Ensure the agent entity exists in the store

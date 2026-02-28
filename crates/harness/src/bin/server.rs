@@ -7,6 +7,7 @@ use anyhow::Result;
 use clap::Parser;
 use sondera_harness::{CedarPolicyHarness, rpc};
 use std::path::PathBuf;
+use tracing_subscriber::fmt::format::FmtSpan;
 
 #[derive(Parser, Debug)]
 #[command(name = "sondera-harness-server")]
@@ -40,6 +41,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_target(false)
+        .with_span_events(FmtSpan::CLOSE)
         .init();
 
     let socket_path = args.socket.unwrap_or_else(rpc::default_socket_path);

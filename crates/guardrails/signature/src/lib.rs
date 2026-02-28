@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::OnceLock;
-use tracing::error;
+use tracing::{error, instrument};
 use yara_x::{Compiler, Rules, Scanner};
 
 static YARA_RULES_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/rules");
@@ -124,6 +124,7 @@ fn extract_metadata<'a>(
 
 /// Scan content against embedded YARA rules.
 /// Returns a `SignatureContext` with matches, aggregated categories, and highest severity.
+#[instrument(skip(content), fields(content_len = content.len()))]
 pub fn scan(content: &str) -> SignatureContext {
     let rules = get_rules();
     let mut scanner = Scanner::new(rules);

@@ -24,6 +24,7 @@ use ollama_rs::{
 };
 use std::path::Path;
 use thiserror::Error;
+use tracing::instrument;
 
 pub use label::{
     Label, LabelCategory, LabelExample, LabelTemplate, SensitivityClassification,
@@ -165,6 +166,7 @@ impl DataModel {
     ///
     /// Each label is evaluated independently. A finding is recorded when
     /// `sensitive == 1` in the model's response.
+    #[instrument(skip(self, content), fields(content_len = content.len()))]
     pub async fn classify(
         &self,
         content: &str,
