@@ -36,6 +36,49 @@ impl CedarPolicyHarness {
     /// Expects exactly one `.cedarschema` file and zero or more `.cedar` policy files.
     /// Agent entities are created dynamically based on the agent field in each Event.
     pub async fn from_policy_dir(path: PathBuf) -> Result<Self> {
+        let entity_store_path = file::get_storage_dir()?.join("entities");
+        let entity_store = EntityStore::open(&entity_store_path).context(format!(
+            "Failed to open entity store: {}",
+            entity_store_path.display()
+        ))?;
+
+        let trajectory_db_path = get_default_db_path()?;
+        let trajectory_store =
+            TrajectoryStore::open(&trajectory_db_path)
+                .await
+                .context(format!(
+                    "Failed to open trajectory store: {}",
+                    trajectory_db_path.display()
+                ))?;
+
+        Self::build(path, entity_store, trajectory_store).await
+    }
+
+    /// Load a CedarPolicyHarness with isolated storage for testing.
+    ///
+    /// Uses the given directory for the entity store and an in-memory trajectory store,
+    /// so each test gets its own independent storage without file-lock contention.
+    pub async fn from_policy_dir_isolated(
+        path: PathBuf,
+        storage_dir: &std::path::Path,
+    ) -> Result<Self> {
+        let entity_store = EntityStore::open(storage_dir.join("entities")).context(format!(
+            "Failed to open entity store: {}",
+            storage_dir.display()
+        ))?;
+
+        let trajectory_store = TrajectoryStore::open_in_memory()
+            .await
+            .context("Failed to open in-memory trajectory store")?;
+
+        Self::build(path, entity_store, trajectory_store).await
+    }
+
+    async fn build(
+        path: PathBuf,
+        entity_store: EntityStore,
+        trajectory_store: TrajectoryStore,
+    ) -> Result<Self> {
         anyhow::ensure!(
             path.is_dir(),
             "Policy directory does not exist: {}",
@@ -108,22 +151,6 @@ impl CedarPolicyHarness {
 
         let schema = Schema::from_schema_fragments(schema_fragments)
             .context("Failed to merge schema fragments")?;
-
-        let entity_store_path = file::get_storage_dir()?.join("entities");
-
-        let entity_store = EntityStore::open(&entity_store_path).context(format!(
-            "Failed to open entity store: {}",
-            entity_store_path.display()
-        ))?;
-
-        let trajectory_db_path = get_default_db_path()?;
-        let trajectory_store =
-            TrajectoryStore::open(&trajectory_db_path)
-                .await
-                .context(format!(
-                    "Failed to open trajectory store: {}",
-                    trajectory_db_path.display()
-                ))?;
 
         // Add Label entity types matching the sensitivity lattice.
         // Names must match Label enum's Display impl and ifc.cedar policy references.

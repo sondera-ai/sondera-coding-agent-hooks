@@ -23,11 +23,13 @@ fn test_agent() -> Agent {
     }
 }
 
-async fn load_harness() -> CedarPolicyHarness {
+async fn load_harness() -> (CedarPolicyHarness, tempfile::TempDir) {
     let path = PathBuf::from(POLICIES_DIR);
-    CedarPolicyHarness::from_policy_dir(path)
+    let temp_dir = tempfile::tempdir().expect("should create temp dir for entity store");
+    let harness = CedarPolicyHarness::from_policy_dir_isolated(path, temp_dir.path())
         .await
-        .expect("should load policies directory")
+        .expect("should load policies directory");
+    (harness, temp_dir)
 }
 
 fn raw_context() -> serde_json::Value {
@@ -64,7 +66,7 @@ fn get_trajectory(harness: &CedarPolicyHarness, trajectory_id: &str) -> Trajecto
 /// non-default label. This test does NOT require Ollama.
 #[tokio::test]
 async fn trajectory_entity_store_roundtrip_preserves_label() {
-    let harness = load_harness().await;
+    let (harness, _temp_dir) = load_harness().await;
     let trajectory_id = format!("test-roundtrip-{}", uuid::Uuid::new_v4());
 
     // Create a trajectory with HighlyConfidential label and upsert it.
@@ -86,7 +88,7 @@ async fn trajectory_entity_store_roundtrip_preserves_label() {
 #[tokio::test]
 #[ignore = "requires Ollama running locally with gpt-oss-safeguard model"]
 async fn trajectory_label_raised_to_highly_confidential_by_pii_prompt() {
-    let harness = load_harness().await;
+    let (harness, _temp_dir) = load_harness().await;
     let trajectory_id = format!("test-ifc-{}", uuid::Uuid::new_v4());
 
     // 1. Start the trajectory — label should be Public (default).
@@ -126,7 +128,7 @@ async fn trajectory_label_raised_to_highly_confidential_by_pii_prompt() {
 #[tokio::test]
 #[ignore = "requires Ollama running locally with gpt-oss-safeguard model"]
 async fn trajectory_label_persists_across_adjudications() {
-    let harness = load_harness().await;
+    let (harness, _temp_dir) = load_harness().await;
     let trajectory_id = format!("test-ifc-{}", uuid::Uuid::new_v4());
 
     // 1. Start trajectory.
