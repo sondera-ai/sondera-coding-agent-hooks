@@ -23,6 +23,7 @@ use ollama_rs::{
     models::ModelOptions,
 };
 use std::path::Path;
+use std::time::Duration;
 use thiserror::Error;
 use tracing::instrument;
 
@@ -178,7 +179,9 @@ impl DataModel {
         let mut findings = Vec::new();
 
         for label in &self.labels {
-            let result = self.classify_single(label, content).await?;
+            let result = self
+                .classify_single(label, content, Duration::from_secs(30))
+                .await?;
 
             if result.sensitive == 1 {
                 let sensitivity_label = result.sensitivity_category;
@@ -214,12 +217,27 @@ impl DataModel {
         &self.config
     }
 
+    /// Health check to verify Ollama is responsive.
+    ///
+    /// Returns Ok(()) if Ollama responds within 5 seconds, Err otherwise.
+    /// Use this at startup to fail fast if Ollama is unavailable.
+    pub async fn health_check(&self) -> Result<(), DataClassificationError> {
+        if let Some(label) = self.labels.first() {
+            self.classify_single(label, "health check", Duration::from_secs(5))
+                .await?;
+            Ok(())
+        } else {
+            Err(DataClassificationError::NoLabels)
+        }
+    }
+
     // -- private helpers ---------------------------------------------------
 
     async fn classify_single(
         &self,
         label: &LabelTemplate,
         content: &str,
+        timeout: Duration,
     ) -> Result<SensitivityModelResult, DataClassificationError> {
         let system_prompt = label.render();
         let user_prompt = label.render_user_message(content);
@@ -236,10 +254,14 @@ impl DataModel {
             .format(format)
             .options(ModelOptions::default().temperature(self.config.temperature));
 
-        let response = self
-            .ollama
-            .send_chat_messages(request)
+        let response = tokio::time::timeout(timeout, self.ollama.send_chat_messages(request))
             .await
+            .map_err(|_| {
+                DataClassificationError::OllamaError(format!(
+                    "Classification timeout after {}s",
+                    timeout.as_secs()
+                ))
+            })?
             .map_err(|e| DataClassificationError::OllamaError(e.to_string()))?;
 
         let result: SensitivityModelResult = serde_json::from_str(&response.message.content)?;

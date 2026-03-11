@@ -17,6 +17,7 @@ use ollama_rs::{
 use schemars::JsonSchema as JsonSchemaDerive;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::time::Duration;
 use strum_macros::{Display, EnumString};
 use thiserror::Error;
 use tracing::instrument;
@@ -269,11 +270,14 @@ impl PolicyModel {
         let mut violations = Vec::new();
 
         for policy in &self.policies {
-            let result = self.evaluate_single(policy, content).await?;
+            let result = self
+                .evaluate_single(policy, content, Duration::from_secs(30))
+                .await?;
 
             if result.violation == 1 {
                 let code = &result.policy_category;
-                let category_name = policy.category_name(code).unwrap_or_else(|| code.clone());
+                let category_name =
+                    policy.category_name(code).unwrap_or_else(|| code.clone());
                 let description = policy
                     .category_definition(code)
                     .unwrap_or_else(|| code.clone());
@@ -322,12 +326,27 @@ impl PolicyModel {
         &self.config
     }
 
+    /// Health check to verify Ollama is responsive.
+    ///
+    /// Returns Ok(()) if Ollama responds within 5 seconds, Err otherwise.
+    /// Use this at startup to fail fast if Ollama is unavailable.
+    pub async fn health_check(&self) -> Result<(), PolicyError> {
+        if let Some(policy) = self.policies.first() {
+            self.evaluate_single(policy, "health check", Duration::from_secs(5))
+                .await?;
+            Ok(())
+        } else {
+            Err(PolicyError::NoPolicies)
+        }
+    }
+
     // -- private helpers ---------------------------------------------------
 
     async fn evaluate_single(
         &self,
         policy: &PolicyTemplate,
         content: &str,
+        timeout: Duration,
     ) -> Result<PolicyModelResult, PolicyError> {
         let system_prompt = policy.render();
         let user_prompt = policy.render_user_message(content);
@@ -344,10 +363,9 @@ impl PolicyModel {
             .format(format)
             .options(ModelOptions::default().temperature(self.config.temperature));
 
-        let response = self
-            .ollama
-            .send_chat_messages(request)
+        let response = tokio::time::timeout(timeout, self.ollama.send_chat_messages(request))
             .await
+            .map_err(|_| PolicyError::Timeout)?
             .map_err(|e| PolicyError::OllamaError(e.to_string()))?;
 
         let result: PolicyModelResult = serde_json::from_str(&response.message.content)?;
