@@ -276,8 +276,7 @@ impl PolicyModel {
 
             if result.violation == 1 {
                 let code = &result.policy_category;
-                let category_name =
-                    policy.category_name(code).unwrap_or_else(|| code.clone());
+                let category_name = policy.category_name(code).unwrap_or_else(|| code.clone());
                 let description = policy
                     .category_definition(code)
                     .unwrap_or_else(|| code.clone());
