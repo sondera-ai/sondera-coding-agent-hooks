@@ -143,12 +143,26 @@ impl LlmBackend {
     ) -> Result<String, LlmBackendError> {
         match self {
             Self::Ollama(b) => {
-                b.chat_completion(model, system_prompt, user_prompt, json_schema, temperature, timeout)
-                    .await
+                b.chat_completion(
+                    model,
+                    system_prompt,
+                    user_prompt,
+                    json_schema,
+                    temperature,
+                    timeout,
+                )
+                .await
             }
             Self::OpenAi(b) => {
-                b.chat_completion(model, system_prompt, user_prompt, json_schema, temperature, timeout)
-                    .await
+                b.chat_completion(
+                    model,
+                    system_prompt,
+                    user_prompt,
+                    json_schema,
+                    temperature,
+                    timeout,
+                )
+                .await
             }
         }
     }

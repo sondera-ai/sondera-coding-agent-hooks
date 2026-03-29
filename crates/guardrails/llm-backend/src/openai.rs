@@ -104,10 +104,9 @@ impl OpenAiBackend {
             )));
         }
 
-        let body: ChatCompletionResponse = response
-            .json()
-            .await
-            .map_err(|e| LlmBackendError::InvalidResponse(format!("Failed to parse response: {e}")))?;
+        let body: ChatCompletionResponse = response.json().await.map_err(|e| {
+            LlmBackendError::InvalidResponse(format!("Failed to parse response: {e}"))
+        })?;
 
         let content = body
             .choices

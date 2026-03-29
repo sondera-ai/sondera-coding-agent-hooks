@@ -16,8 +16,8 @@
 //!   export SONDERA_MODEL=default
 
 use sondera_policy::{
-    sondera_llm_backend::LlmBackend, BackendConfig, ConversationMessage, PolicyClassification,
-    PolicyModel, PolicyModelBuilder, PolicyTemplate,
+    BackendConfig, ConversationMessage, PolicyClassification, PolicyModel, PolicyModelBuilder,
+    PolicyTemplate, sondera_llm_backend::LlmBackend,
 };
 
 const BASELINE_TOML: &str = concat!(
@@ -38,7 +38,9 @@ fn baseline_model() -> PolicyModel {
 
 fn single_policy_model(policy: PolicyTemplate) -> PolicyModel {
     let backend_config = BackendConfig::from_env();
-    let mut builder = PolicyModelBuilder::new().policy(policy).backend(backend_config);
+    let mut builder = PolicyModelBuilder::new()
+        .policy(policy)
+        .backend(backend_config);
     if let Ok(model) = std::env::var("SONDERA_MODEL") {
         builder = builder.model(model);
     }

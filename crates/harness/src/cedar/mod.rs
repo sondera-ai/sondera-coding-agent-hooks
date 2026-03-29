@@ -183,11 +183,8 @@ impl CedarPolicyHarness {
         )?;
 
         let policy_model_path = path.join("policies.toml");
-        let policy_model = PolicyModel::from_toml_with_backend(
-            policy_model_path,
-            backend,
-            model_name.as_deref(),
-        )?;
+        let policy_model =
+            PolicyModel::from_toml_with_backend(policy_model_path, backend, model_name.as_deref())?;
 
         Ok(Self {
             authorizer: Authorizer::new(),

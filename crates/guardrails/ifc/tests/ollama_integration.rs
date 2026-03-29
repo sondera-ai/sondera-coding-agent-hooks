@@ -16,8 +16,8 @@
 //!   export SONDERA_MODEL=default
 
 use sondera_information_flow_control::{
-    sondera_llm_backend::LlmBackend, BackendConfig, DataModel, DataModelBuilder, Label,
-    LabelTemplate, SensitivityClassification,
+    BackendConfig, DataModel, DataModelBuilder, Label, LabelTemplate, SensitivityClassification,
+    sondera_llm_backend::LlmBackend,
 };
 
 const BASELINE_TOML: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../policies/ifc.toml");
