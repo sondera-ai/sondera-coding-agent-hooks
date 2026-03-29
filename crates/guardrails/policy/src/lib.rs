@@ -18,7 +18,7 @@ use thiserror::Error;
 use tracing::instrument;
 
 pub use policy::{PolicyClassification, PolicyTemplate, PolicyViolation};
-pub use sondera_llm_backend::BackendConfig;
+pub use sondera_llm_backend::{self, BackendConfig};
 
 // ---------------------------------------------------------------------------
 // Structured output from gpt-oss-safeguard
@@ -270,9 +270,14 @@ impl PolicyModel {
 
         let mut violations = Vec::new();
 
+        let timeout_secs = std::env::var("SONDERA_TIMEOUT")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(30);
+
         for policy in &self.policies {
             let result = self
-                .evaluate_single(policy, content, Duration::from_secs(30))
+                .evaluate_single(policy, content, Duration::from_secs(timeout_secs))
                 .await?;
 
             if result.violation == 1 {

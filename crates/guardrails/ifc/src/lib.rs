@@ -190,9 +190,14 @@ impl DataModel {
 
         let mut findings = Vec::new();
 
+        let timeout_secs = std::env::var("SONDERA_TIMEOUT")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(30);
+
         for label in &self.labels {
             let result = self
-                .classify_single(label, content, Duration::from_secs(30))
+                .classify_single(label, content, Duration::from_secs(timeout_secs))
                 .await?;
 
             if result.sensitive == 1 {

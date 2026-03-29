@@ -1,17 +1,23 @@
-//! Integration tests for policy evaluation against a local Ollama server.
+//! Integration tests for policy evaluation against an LLM backend.
 //!
-//! These tests require a running Ollama instance with the `gpt-oss-safeguard:20b`
-//! model pulled.
+//! By default these tests use Ollama at localhost:11434. Set `SONDERA_BACKEND=openai`
+//! and `SONDERA_OPENAI_BASE_URL` to use an OpenAI-compatible endpoint (e.g. DreamServer).
 //!
 //! To run:
-//!   cargo test -p sondera-policy --test ollama_integration
+//!   cargo test -p sondera-policy --test ollama_integration -- --ignored
 //!
-//! Prerequisites:
+//! Prerequisites (Ollama):
 //!   ollama pull gpt-oss-safeguard:20b
-//!   ollama serve  # default: http://localhost:11434
+//!   ollama serve
+//!
+//! Prerequisites (DreamServer):
+//!   export SONDERA_BACKEND=openai
+//!   export SONDERA_OPENAI_BASE_URL=http://localhost:4000/v1
+//!   export SONDERA_MODEL=default
 
 use sondera_policy::{
-    ConversationMessage, PolicyClassification, PolicyModel, PolicyModelBuilder, PolicyTemplate,
+    sondera_llm_backend::LlmBackend, BackendConfig, ConversationMessage, PolicyClassification,
+    PolicyModel, PolicyModelBuilder, PolicyTemplate,
 };
 
 const BASELINE_TOML: &str = concat!(
@@ -24,11 +30,19 @@ const BASELINE_TOML: &str = concat!(
 // ---------------------------------------------------------------------------
 
 fn baseline_model() -> PolicyModel {
-    PolicyModel::from_toml(BASELINE_TOML).expect("baseline.toml should load")
+    let backend = LlmBackend::from_env();
+    let model_name = std::env::var("SONDERA_MODEL").ok();
+    PolicyModel::from_toml_with_backend(BASELINE_TOML, backend, model_name.as_deref())
+        .expect("baseline.toml should load")
 }
 
 fn single_policy_model(policy: PolicyTemplate) -> PolicyModel {
-    PolicyModelBuilder::new().policy(policy).build()
+    let backend_config = BackendConfig::from_env();
+    let mut builder = PolicyModelBuilder::new().policy(policy).backend(backend_config);
+    if let Ok(model) = std::env::var("SONDERA_MODEL") {
+        builder = builder.model(model);
+    }
+    builder.build()
 }
 
 fn assert_non_compliant(result: &PolicyClassification, expected_category: &str) {
@@ -57,7 +71,7 @@ fn assert_non_compliant(result: &PolicyClassification, expected_category: &str) 
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires running LLM backend (Ollama or DreamServer)"]
 async fn injection_sql_f_string_is_violation() {
     let model = baseline_model();
     let code = r#"
@@ -70,7 +84,7 @@ def get_user(user_id):
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires running LLM backend (Ollama or DreamServer)"]
 async fn injection_parameterized_query_is_safe() {
     let model = baseline_model();
     let code = r#"
@@ -88,7 +102,7 @@ def get_user(user_id):
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires running LLM backend (Ollama or DreamServer)"]
 async fn injection_os_system_is_violation() {
     let model = baseline_model();
     let code = r#"
@@ -105,7 +119,7 @@ def ping_host(hostname):
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires running LLM backend (Ollama or DreamServer)"]
 async fn secrets_hardcoded_api_key_is_violation() {
     let model = baseline_model();
     let code = r#"
@@ -118,7 +132,7 @@ response = requests.get("https://api.example.com/data", headers=headers)
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires running LLM backend (Ollama or DreamServer)"]
 async fn secrets_env_var_is_safe() {
     let model = baseline_model();
     let code = r#"
@@ -141,7 +155,7 @@ response = requests.get("https://api.example.com/data", headers=headers)
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires running LLM backend (Ollama or DreamServer)"]
 async fn crypto_md5_password_hash_is_violation() {
     let model = baseline_model();
     let code = r#"
@@ -154,7 +168,7 @@ def hash_password(password):
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires running LLM backend (Ollama or DreamServer)"]
 async fn crypto_bcrypt_is_safe() {
     let model = baseline_model();
     let code = r#"
@@ -176,7 +190,7 @@ def hash_password(password):
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires running LLM backend (Ollama or DreamServer)"]
 async fn deserialization_pickle_loads_is_violation() {
     let model = baseline_model();
     let code = r#"
@@ -190,7 +204,7 @@ def handle_request(request):
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires running LLM backend (Ollama or DreamServer)"]
 async fn deserialization_json_loads_is_safe() {
     let model = baseline_model();
     let code = r#"
@@ -213,7 +227,7 @@ def handle_request(request):
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires running LLM backend (Ollama or DreamServer)"]
 async fn access_control_no_auth_delete_is_violation() {
     let model = baseline_model();
     let code = r#"
@@ -227,7 +241,7 @@ def delete_user(id):
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires running LLM backend (Ollama or DreamServer)"]
 async fn access_control_with_auth_is_safe() {
     let model = baseline_model();
     let code = r#"
@@ -253,7 +267,7 @@ def delete_user(id):
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires running LLM backend (Ollama or DreamServer)"]
 async fn path_traversal_unsanitized_join_is_violation() {
     let model = baseline_model();
     let code = r#"
@@ -267,7 +281,7 @@ fn read_upload(user_filename: &str) -> std::io::Result<Vec<u8>> {
 }
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires running LLM backend (Ollama or DreamServer)"]
 async fn path_traversal_canonicalized_is_safe() {
     let model = baseline_model();
     let code = r#"
@@ -295,7 +309,7 @@ fn read_upload(user_filename: &str) -> anyhow::Result<Vec<u8>> {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires running LLM backend (Ollama or DreamServer)"]
 async fn single_policy_injection_only() {
     let policy = PolicyTemplate::new("INJECTION_CHECK", "IJ")
         .instructions(
@@ -336,7 +350,7 @@ async fn single_policy_injection_only() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires running LLM backend (Ollama or DreamServer)"]
 async fn evaluate_conversation_with_violation() {
     let model = baseline_model();
     let history = vec![
@@ -356,7 +370,7 @@ async fn evaluate_conversation_with_violation() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-#[ignore = "requires running Ollama instance"]
+#[ignore = "requires running LLM backend (Ollama or DreamServer)"]
 async fn baseline_compliant_code_passes_all_policies() {
     let model = baseline_model();
     let code = r#"

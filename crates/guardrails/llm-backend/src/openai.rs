@@ -54,6 +54,10 @@ impl OpenAiBackend {
             system_prompt.to_string()
         };
 
+        // Resolve $ref references in the schema — some OpenAI-compatible servers
+        // (e.g. llama-server) do not resolve $ref internally, so we inline them.
+        let resolved_schema = resolve_refs(&json_schema);
+
         let request_body = ChatCompletionRequest {
             model: model.to_string(),
             messages: vec![
@@ -72,7 +76,7 @@ impl OpenAiBackend {
                 json_schema: Some(JsonSchemaFormat {
                     name: "response".to_string(),
                     strict: true,
-                    schema: json_schema,
+                    schema: resolved_schema,
                 }),
             }),
         };
@@ -169,4 +173,50 @@ struct Choice {
 struct ResponseMessage {
     #[serde(default)]
     content: String,
+}
+
+// ---------------------------------------------------------------------------
+// JSON Schema $ref resolver
+// ---------------------------------------------------------------------------
+
+/// Inline all `$ref` pointers in a JSON Schema so that servers which do not
+/// resolve `$ref` (e.g. llama-server) can still apply grammar constraints.
+fn resolve_refs(schema: &serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+
+    let defs = schema
+        .get("$defs")
+        .or_else(|| schema.get("definitions"))
+        .cloned()
+        .unwrap_or(Value::Object(Default::default()));
+
+    fn inline(node: &Value, defs: &Value) -> Value {
+        match node {
+            Value::Object(map) => {
+                if let Some(Value::String(r)) = map.get("$ref") {
+                    // Resolve "#/$defs/Foo" or "#/definitions/Foo"
+                    let name = r
+                        .strip_prefix("#/$defs/")
+                        .or_else(|| r.strip_prefix("#/definitions/"));
+                    if let Some(def_name) = name {
+                        if let Some(def) = defs.get(def_name) {
+                            return inline(def, defs);
+                        }
+                    }
+                }
+                let mut out = serde_json::Map::new();
+                for (k, v) in map {
+                    if k == "$defs" || k == "definitions" {
+                        continue; // strip the definitions block
+                    }
+                    out.insert(k.clone(), inline(v, defs));
+                }
+                Value::Object(out)
+            }
+            Value::Array(arr) => Value::Array(arr.iter().map(|v| inline(v, defs)).collect()),
+            other => other.clone(),
+        }
+    }
+
+    inline(schema, &defs)
 }
