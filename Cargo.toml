@@ -6,6 +6,7 @@ members = [
     "apps/cursor",
     "apps/gemini",
     "crates/guardrails/ifc",
+    "crates/guardrails/llm-backend",
     "crates/guardrails/policy",
     "crates/guardrails/signature",
     "crates/harness",
@@ -24,6 +25,7 @@ sondera-mcp = { path = "crates/mcp" }
 sondera-signature = { path = "crates/guardrails/signature" }
 sondera-policy = { path = "crates/guardrails/policy" }
 sondera-information-flow-control = { path = "crates/guardrails/ifc" }
+sondera-llm-backend = { path = "crates/guardrails/llm-backend" }
 
 [profile.release]
 lto = true

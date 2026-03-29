@@ -5410,12 +5410,12 @@ dependencies = [
  "dirs 6.0.0",
  "fjall",
  "futures",
- "ollama-rs",
  "schemars 1.2.1",
  "serde",
  "serde_json",
  "shlex",
  "sondera-information-flow-control",
+ "sondera-llm-backend",
  "sondera-policy",
  "sondera-signature",
  "strum 0.27.2",
@@ -5450,15 +5450,29 @@ dependencies = [
 name = "sondera-information-flow-control"
 version = "0.1.0"
 dependencies = [
- "ollama-rs",
  "schemars 1.2.1",
  "serde",
  "serde_json",
+ "sondera-llm-backend",
  "strum 0.27.2",
  "strum_macros 0.27.2",
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",
+ "tracing",
+]
+
+[[package]]
+name = "sondera-llm-backend"
+version = "0.1.0"
+dependencies = [
+ "ollama-rs",
+ "reqwest",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
  "tracing",
 ]
 
@@ -5483,10 +5497,10 @@ name = "sondera-policy"
 version = "0.1.0"
 dependencies = [
  "clap",
- "ollama-rs",
  "schemars 1.2.1",
  "serde",
  "serde_json",
+ "sondera-llm-backend",
  "strum 0.27.2",
  "strum_macros 0.27.2",
  "thiserror 2.0.18",
