@@ -197,10 +197,8 @@ fn resolve_refs(schema: &serde_json::Value) -> serde_json::Value {
                     let name = r
                         .strip_prefix("#/$defs/")
                         .or_else(|| r.strip_prefix("#/definitions/"));
-                    if let Some(def_name) = name {
-                        if let Some(def) = defs.get(def_name) {
-                            return inline(def, defs);
-                        }
+                    if let Some(def) = name.and_then(|def_name| defs.get(def_name)) {
+                        return inline(def, defs);
                     }
                 }
                 let mut out = serde_json::Map::new();
