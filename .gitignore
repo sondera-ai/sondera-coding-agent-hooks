@@ -28,3 +28,6 @@ target
 # Debug
 *.log
 .gitnexus
+
+# GitNexus auto-generated skill files (user-scope only, not repo-tracked)
+.claude/skills/gitnexus/
