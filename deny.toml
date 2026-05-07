@@ -41,8 +41,23 @@ ignore = [
     "RUSTSEC-2023-0071",
     # Transitive via turbomcp-transport -> rustls-pemfile (unmaintained, no fix available)
     "RUSTSEC-2025-0134",
-    # Transitive dependency advisory (no fix available)
-    "RUSTSEC-2026-0006",
+    # rand 0.8.5 unsoundness with custom logger (patched in >=0.9.3 / >=0.10.1);
+    # rand ^0.8 is pinned by tarpc 0.37.0 and num-bigint-dig 0.8.6 (via yara-x -> rsa/dsa),
+    # no stable upgrade path available; rand 0.9.x path is fixed (updated to 0.9.3)
+    "RUSTSEC-2026-0097",
+    # Transitive via yara-x -> wasmtime 40.0.4 (patched in >=42.0.2, but yara-x 1.14.0 pins ^40.0.4;
+    # no fix available until yara-x upstream bumps its wasmtime dependency)
+    "RUSTSEC-2026-0085",
+    "RUSTSEC-2026-0086",
+    "RUSTSEC-2026-0087",
+    "RUSTSEC-2026-0088",
+    "RUSTSEC-2026-0089",
+    "RUSTSEC-2026-0091",
+    "RUSTSEC-2026-0092",
+    "RUSTSEC-2026-0093",
+    "RUSTSEC-2026-0094",
+    "RUSTSEC-2026-0095",
+    "RUSTSEC-2026-0096",
 ]
 
 [sources]

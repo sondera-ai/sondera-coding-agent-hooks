@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::process;
 
 use clap::Parser;
-use sondera_policy::{PolicyModel, PolicyModelConfig};
+use sondera_policy::{BackendConfig, PolicyModel, PolicyModelConfig};
 
 #[derive(Parser)]
 #[command(
@@ -17,13 +17,25 @@ struct Cli {
     #[arg(short, long, default_value = "policies/policies.toml")]
     policies: PathBuf,
 
-    /// Ollama host URL.
+    /// Backend type: "ollama" or "openai".
+    #[arg(long, default_value = "ollama")]
+    backend: String,
+
+    /// Ollama host URL (used when --backend=ollama).
     #[arg(long, default_value = "http://localhost")]
     host: String,
 
-    /// Ollama port.
+    /// Ollama port (used when --backend=ollama).
     #[arg(long, default_value_t = 11434)]
     port: u16,
+
+    /// OpenAI-compatible base URL (used when --backend=openai).
+    #[arg(long)]
+    base_url: Option<String>,
+
+    /// API key for OpenAI-compatible backend.
+    #[arg(long)]
+    api_key: Option<String>,
 
     /// Model name.
     #[arg(long, default_value = "gpt-oss-safeguard:20b")]
@@ -65,9 +77,25 @@ async fn main() {
         }
     };
 
+    let backend = match cli.backend.as_str() {
+        "openai" => {
+            let base_url = cli.base_url.unwrap_or_else(|| {
+                eprintln!("Error: --base-url is required when --backend=openai");
+                process::exit(1);
+            });
+            BackendConfig::OpenAi {
+                base_url,
+                api_key: cli.api_key,
+            }
+        }
+        _ => BackendConfig::Ollama {
+            host: cli.host,
+            port: cli.port,
+        },
+    };
+
     let config = PolicyModelConfig {
-        host: cli.host,
-        port: cli.port,
+        backend,
         model: cli.model,
         temperature: 0.0,
     };

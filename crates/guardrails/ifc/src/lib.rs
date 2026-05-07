@@ -16,12 +16,7 @@
 
 mod label;
 
-use ollama_rs::{
-    Ollama,
-    generation::chat::{ChatMessage, request::ChatMessageRequest},
-    generation::parameters::{FormatType, JsonStructure},
-    models::ModelOptions,
-};
+use sondera_llm_backend::{LlmBackend, LlmBackendError};
 use std::path::Path;
 use std::time::Duration;
 use thiserror::Error;
@@ -31,6 +26,7 @@ pub use label::{
     Label, LabelCategory, LabelExample, LabelTemplate, SensitivityClassification,
     SensitivityFinding, SensitivityModelResult,
 };
+pub use sondera_llm_backend::{self, BackendConfig};
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -39,8 +35,8 @@ pub use label::{
 /// Errors that can occur during data classification.
 #[derive(Debug, Error)]
 pub enum DataClassificationError {
-    #[error("Ollama API error: {0}")]
-    OllamaError(String),
+    #[error("LLM backend error: {0}")]
+    BackendError(String),
     #[error("Failed to parse classification response: {0}")]
     ParseError(#[from] serde_json::Error),
     #[error("No label templates configured")]
@@ -51,6 +47,12 @@ pub enum DataClassificationError {
     TomlError(String),
 }
 
+impl From<LlmBackendError> for DataClassificationError {
+    fn from(e: LlmBackendError) -> Self {
+        Self::BackendError(e.to_string())
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Model configuration
 // ---------------------------------------------------------------------------
@@ -58,10 +60,8 @@ pub enum DataClassificationError {
 /// Configuration for the data classification model.
 #[derive(Debug, Clone)]
 pub struct DataModelConfig {
-    /// Ollama host URL (default: http://localhost)
-    pub host: String,
-    /// Ollama port (default: 11434)
-    pub port: u16,
+    /// Backend connection configuration.
+    pub backend: BackendConfig,
     /// Model name (default: gpt-oss-safeguard:20b)
     pub model: String,
     /// Temperature for model inference (default: 0.0 for deterministic output)
@@ -71,8 +71,7 @@ pub struct DataModelConfig {
 impl Default for DataModelConfig {
     fn default() -> Self {
         Self {
-            host: "http://localhost".to_string(),
-            port: 11434,
+            backend: BackendConfig::default(),
             model: "gpt-oss-safeguard:20b".to_string(),
             temperature: 0.0,
         }
@@ -87,13 +86,8 @@ impl DataModelConfig {
         }
     }
 
-    pub fn host(mut self, host: impl Into<String>) -> Self {
-        self.host = host.into();
-        self
-    }
-
-    pub fn port(mut self, port: u16) -> Self {
-        self.port = port;
+    pub fn backend(mut self, backend: BackendConfig) -> Self {
+        self.backend = backend;
         self
     }
 
@@ -139,7 +133,7 @@ impl DataModelConfig {
 /// # }
 /// ```
 pub struct DataModel {
-    ollama: Ollama,
+    backend: LlmBackend,
     config: DataModelConfig,
     labels: Vec<LabelTemplate>,
 }
@@ -154,10 +148,28 @@ impl DataModel {
         Ok(Self::new(labels))
     }
 
+    /// Load label templates from TOML with an explicit backend and optional model override.
+    pub fn from_toml_with_backend(
+        path: impl AsRef<Path>,
+        backend: LlmBackend,
+        model: Option<&str>,
+    ) -> Result<Self, DataClassificationError> {
+        let labels = LabelTemplate::load_from_toml(path)?;
+        let mut config = DataModelConfig::default();
+        if let Some(m) = model {
+            config.model = m.to_string();
+        }
+        Ok(Self {
+            backend,
+            config,
+            labels,
+        })
+    }
+
     pub fn with_config(labels: Vec<LabelTemplate>, config: DataModelConfig) -> Self {
-        let ollama = Ollama::new(config.host.clone(), config.port);
+        let backend = LlmBackend::from_config(&config.backend);
         Self {
-            ollama,
+            backend,
             config,
             labels,
         }
@@ -178,9 +190,14 @@ impl DataModel {
 
         let mut findings = Vec::new();
 
+        let timeout_secs = std::env::var("SONDERA_TIMEOUT")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(30);
+
         for label in &self.labels {
             let result = self
-                .classify_single(label, content, Duration::from_secs(30))
+                .classify_single(label, content, Duration::from_secs(timeout_secs))
                 .await?;
 
             if result.sensitive == 1 {
@@ -242,29 +259,22 @@ impl DataModel {
         let system_prompt = label.render();
         let user_prompt = label.render_user_message(content);
 
-        let messages = vec![
-            ChatMessage::system(system_prompt),
-            ChatMessage::user(user_prompt),
-        ];
+        let json_schema = serde_json::to_value(schemars::schema_for!(SensitivityModelResult))
+            .map_err(|e| DataClassificationError::BackendError(format!("Schema error: {e}")))?;
 
-        let format =
-            FormatType::StructuredJson(Box::new(JsonStructure::new::<SensitivityModelResult>()));
+        let response = self
+            .backend
+            .chat_completion(
+                &self.config.model,
+                &system_prompt,
+                &user_prompt,
+                json_schema,
+                self.config.temperature,
+                timeout,
+            )
+            .await?;
 
-        let request = ChatMessageRequest::new(self.config.model.clone(), messages)
-            .format(format)
-            .options(ModelOptions::default().temperature(self.config.temperature));
-
-        let response = tokio::time::timeout(timeout, self.ollama.send_chat_messages(request))
-            .await
-            .map_err(|_| {
-                DataClassificationError::OllamaError(format!(
-                    "Classification timeout after {}s",
-                    timeout.as_secs()
-                ))
-            })?
-            .map_err(|e| DataClassificationError::OllamaError(e.to_string()))?;
-
-        let result: SensitivityModelResult = serde_json::from_str(&response.message.content)?;
+        let result: SensitivityModelResult = serde_json::from_str(&response)?;
 
         Ok(result)
     }
@@ -290,13 +300,8 @@ impl DataModelBuilder {
         self
     }
 
-    pub fn host(mut self, host: impl Into<String>) -> Self {
-        self.config.host = host.into();
-        self
-    }
-
-    pub fn port(mut self, port: u16) -> Self {
-        self.config.port = port;
+    pub fn backend(mut self, backend: BackendConfig) -> Self {
+        self.config.backend = backend;
         self
     }
 
@@ -328,8 +333,10 @@ mod tests {
     #[test]
     fn data_model_builder_custom_config() {
         let model = DataModelBuilder::new()
-            .host("http://192.168.1.100")
-            .port(11435)
+            .backend(BackendConfig::Ollama {
+                host: "http://192.168.1.100".to_string(),
+                port: 11435,
+            })
             .model("gpt-oss-safeguard:120b")
             .temperature(0.1)
             .label(LabelTemplate::new("L1").category(Label::Public, "Public."))
@@ -337,8 +344,6 @@ mod tests {
             .build();
 
         assert_eq!(model.model(), "gpt-oss-safeguard:120b");
-        assert_eq!(model.config().host, "http://192.168.1.100");
-        assert_eq!(model.config().port, 11435);
         assert_eq!(model.labels().len(), 2);
     }
 

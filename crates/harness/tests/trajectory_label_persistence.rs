@@ -86,7 +86,7 @@ async fn trajectory_entity_store_roundtrip_preserves_label() {
 }
 
 #[tokio::test]
-#[ignore = "requires Ollama running locally with gpt-oss-safeguard model"]
+#[ignore = "requires running LLM backend (Ollama or DreamServer)"]
 async fn trajectory_label_raised_to_highly_confidential_by_pii_prompt() {
     let (harness, _temp_dir) = load_harness().await;
     let trajectory_id = format!("test-ifc-{}", uuid::Uuid::new_v4());
@@ -126,7 +126,7 @@ async fn trajectory_label_raised_to_highly_confidential_by_pii_prompt() {
 }
 
 #[tokio::test]
-#[ignore = "requires Ollama running locally with gpt-oss-safeguard model"]
+#[ignore = "requires running LLM backend (Ollama or DreamServer)"]
 async fn trajectory_label_persists_across_adjudications() {
     let (harness, _temp_dir) = load_harness().await;
     let trajectory_id = format!("test-ifc-{}", uuid::Uuid::new_v4());

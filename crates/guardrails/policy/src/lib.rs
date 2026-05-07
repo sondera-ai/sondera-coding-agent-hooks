@@ -8,14 +8,9 @@
 
 mod policy;
 
-use ollama_rs::{
-    Ollama,
-    generation::chat::{ChatMessage, MessageRole, request::ChatMessageRequest},
-    generation::parameters::{FormatType, JsonStructure},
-    models::ModelOptions,
-};
 use schemars::JsonSchema as JsonSchemaDerive;
 use serde::{Deserialize, Serialize};
+use sondera_llm_backend::{LlmBackend, LlmBackendError};
 use std::path::Path;
 use std::time::Duration;
 use strum_macros::{Display, EnumString};
@@ -23,6 +18,7 @@ use thiserror::Error;
 use tracing::instrument;
 
 pub use policy::{PolicyClassification, PolicyTemplate, PolicyViolation};
+pub use sondera_llm_backend::{self, BackendConfig};
 
 // ---------------------------------------------------------------------------
 // Structured output from gpt-oss-safeguard
@@ -47,8 +43,8 @@ pub struct PolicyModelResult {
 /// Errors that can occur during policy evaluation.
 #[derive(Debug, Error)]
 pub enum PolicyError {
-    #[error("Ollama API error: {0}")]
-    OllamaError(String),
+    #[error("LLM backend error: {0}")]
+    BackendError(String),
     #[error("Failed to parse classification response: {0}")]
     ParseError(#[from] serde_json::Error),
     #[error("Policy model not available: {0}")]
@@ -63,6 +59,12 @@ pub enum PolicyError {
     IoError(String),
     #[error("Failed to parse TOML: {0}")]
     TomlError(String),
+}
+
+impl From<LlmBackendError> for PolicyError {
+    fn from(e: LlmBackendError) -> Self {
+        Self::BackendError(e.to_string())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -126,17 +128,6 @@ impl ConversationMessage {
     }
 }
 
-impl From<ConversationRole> for MessageRole {
-    fn from(role: ConversationRole) -> Self {
-        match role {
-            ConversationRole::User => MessageRole::User,
-            ConversationRole::Assistant => MessageRole::Assistant,
-            ConversationRole::System => MessageRole::System,
-            ConversationRole::Tool => MessageRole::Tool,
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Model configuration
 // ---------------------------------------------------------------------------
@@ -144,10 +135,8 @@ impl From<ConversationRole> for MessageRole {
 /// Configuration for the policy model.
 #[derive(Debug, Clone)]
 pub struct PolicyModelConfig {
-    /// Ollama host URL (default: http://localhost)
-    pub host: String,
-    /// Ollama port (default: 11434)
-    pub port: u16,
+    /// Backend connection configuration.
+    pub backend: BackendConfig,
     /// Model name (default: gpt-oss-safeguard:20b)
     pub model: String,
     /// Temperature for model inference (default: 0.0 for deterministic output)
@@ -157,8 +146,7 @@ pub struct PolicyModelConfig {
 impl Default for PolicyModelConfig {
     fn default() -> Self {
         Self {
-            host: "http://localhost".to_string(),
-            port: 11434,
+            backend: BackendConfig::default(),
             model: "gpt-oss-safeguard:20b".to_string(),
             temperature: 0.0,
         }
@@ -173,13 +161,8 @@ impl PolicyModelConfig {
         }
     }
 
-    pub fn host(mut self, host: impl Into<String>) -> Self {
-        self.host = host.into();
-        self
-    }
-
-    pub fn port(mut self, port: u16) -> Self {
-        self.port = port;
+    pub fn backend(mut self, backend: BackendConfig) -> Self {
+        self.backend = backend;
         self
     }
 
@@ -225,7 +208,7 @@ impl PolicyModelConfig {
 /// # }
 /// ```
 pub struct PolicyModel {
-    ollama: Ollama,
+    backend: LlmBackend,
     config: PolicyModelConfig,
     policies: Vec<PolicyTemplate>,
 }
@@ -240,10 +223,28 @@ impl PolicyModel {
         Ok(Self::new(policies))
     }
 
+    /// Load policy templates from TOML with an explicit backend and optional model override.
+    pub fn from_toml_with_backend(
+        path: impl AsRef<Path>,
+        backend: LlmBackend,
+        model: Option<&str>,
+    ) -> Result<Self, PolicyError> {
+        let policies = PolicyTemplate::load_from_toml(path)?;
+        let mut config = PolicyModelConfig::default();
+        if let Some(m) = model {
+            config.model = m.to_string();
+        }
+        Ok(Self {
+            backend,
+            config,
+            policies,
+        })
+    }
+
     pub fn with_config(policies: Vec<PolicyTemplate>, config: PolicyModelConfig) -> Self {
-        let ollama = Ollama::new(config.host.clone(), config.port);
+        let backend = LlmBackend::from_config(&config.backend);
         Self {
-            ollama,
+            backend,
             config,
             policies,
         }
@@ -269,9 +270,14 @@ impl PolicyModel {
 
         let mut violations = Vec::new();
 
+        let timeout_secs = std::env::var("SONDERA_TIMEOUT")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(30);
+
         for policy in &self.policies {
             let result = self
-                .evaluate_single(policy, content, Duration::from_secs(30))
+                .evaluate_single(policy, content, Duration::from_secs(timeout_secs))
                 .await?;
 
             if result.violation == 1 {
@@ -350,24 +356,22 @@ impl PolicyModel {
         let system_prompt = policy.render();
         let user_prompt = policy.render_user_message(content);
 
-        let messages = vec![
-            ChatMessage::system(system_prompt),
-            ChatMessage::user(user_prompt),
-        ];
+        let json_schema = serde_json::to_value(schemars::schema_for!(PolicyModelResult))
+            .map_err(|e| PolicyError::BackendError(format!("Schema error: {e}")))?;
 
-        let format =
-            FormatType::StructuredJson(Box::new(JsonStructure::new::<PolicyModelResult>()));
+        let response = self
+            .backend
+            .chat_completion(
+                &self.config.model,
+                &system_prompt,
+                &user_prompt,
+                json_schema,
+                self.config.temperature,
+                timeout,
+            )
+            .await?;
 
-        let request = ChatMessageRequest::new(self.config.model.clone(), messages)
-            .format(format)
-            .options(ModelOptions::default().temperature(self.config.temperature));
-
-        let response = tokio::time::timeout(timeout, self.ollama.send_chat_messages(request))
-            .await
-            .map_err(|_| PolicyError::Timeout)?
-            .map_err(|e| PolicyError::OllamaError(e.to_string()))?;
-
-        let result: PolicyModelResult = serde_json::from_str(&response.message.content)?;
+        let result: PolicyModelResult = serde_json::from_str(&response)?;
 
         Ok(result)
     }
@@ -401,13 +405,8 @@ impl PolicyModelBuilder {
         self
     }
 
-    pub fn host(mut self, host: impl Into<String>) -> Self {
-        self.config.host = host.into();
-        self
-    }
-
-    pub fn port(mut self, port: u16) -> Self {
-        self.config.port = port;
+    pub fn backend(mut self, backend: BackendConfig) -> Self {
+        self.config.backend = backend;
         self
     }
 
@@ -529,8 +528,10 @@ mod tests {
     #[test]
     fn policy_model_builder() {
         let model = PolicyModelBuilder::new()
-            .host("http://192.168.1.100")
-            .port(11435)
+            .backend(BackendConfig::Ollama {
+                host: "http://192.168.1.100".to_string(),
+                port: 11435,
+            })
             .model("gpt-oss-safeguard:120b")
             .temperature(0.1)
             .policy(PolicyTemplate::new("P1", "A").category("A0", "Safe", "Safe."))
@@ -538,7 +539,6 @@ mod tests {
             .build();
 
         assert_eq!(model.model(), "gpt-oss-safeguard:120b");
-        assert_eq!(model.config().host, "http://192.168.1.100");
         assert_eq!(model.policies().len(), 2);
     }
 

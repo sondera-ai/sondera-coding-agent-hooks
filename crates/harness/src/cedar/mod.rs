@@ -15,6 +15,7 @@ use cedar_policy::{
     Schema, SchemaFragment,
 };
 use sondera_information_flow_control::DataModel;
+use sondera_llm_backend::LlmBackend;
 use sondera_policy::PolicyModel;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -171,11 +172,19 @@ impl CedarPolicyHarness {
         entity_store.upsert(&internal_label)?;
         entity_store.upsert(&public_label)?;
 
+        let backend = LlmBackend::from_env();
+        let model_name = std::env::var("SONDERA_MODEL").ok();
+
         let data_model_path = path.join("ifc.toml");
-        let data_model = DataModel::from_toml(data_model_path)?;
+        let data_model = DataModel::from_toml_with_backend(
+            data_model_path,
+            backend.clone(),
+            model_name.as_deref(),
+        )?;
 
         let policy_model_path = path.join("policies.toml");
-        let policy_model = PolicyModel::from_toml(policy_model_path)?;
+        let policy_model =
+            PolicyModel::from_toml_with_backend(policy_model_path, backend, model_name.as_deref())?;
 
         Ok(Self {
             authorizer: Authorizer::new(),
