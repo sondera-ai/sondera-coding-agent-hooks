@@ -26,8 +26,8 @@ pub struct CedarPolicyHarness {
     trajectory_store: TrajectoryStore,
     schema: Schema,
     policy_set: PolicySet,
-    data_model: DataModel,
-    policy_model: PolicyModel,
+    data_model: Option<DataModel>,
+    policy_model: Option<PolicyModel>,
 }
 
 impl CedarPolicyHarness {
@@ -36,6 +36,13 @@ impl CedarPolicyHarness {
     /// Expects exactly one `.cedarschema` file and zero or more `.cedar` policy files.
     /// Agent entities are created dynamically based on the agent field in each Event.
     pub async fn from_policy_dir(path: PathBuf) -> Result<Self> {
+        Self::from_policy_dir_with_options(path, false).await
+    }
+
+    pub async fn from_policy_dir_with_options(
+        path: PathBuf,
+        deterministic_only: bool,
+    ) -> Result<Self> {
         let entity_store_path = file::get_storage_dir()?.join("entities");
         let entity_store = EntityStore::open(&entity_store_path).context(format!(
             "Failed to open entity store: {}",
@@ -51,16 +58,20 @@ impl CedarPolicyHarness {
                     trajectory_db_path.display()
                 ))?;
 
-        Self::build(path, entity_store, trajectory_store).await
+        Self::build(path, entity_store, trajectory_store, deterministic_only).await
     }
 
-    /// Load a CedarPolicyHarness with isolated storage for testing.
-    ///
-    /// Uses the given directory for the entity store and an in-memory trajectory store,
-    /// so each test gets its own independent storage without file-lock contention.
     pub async fn from_policy_dir_isolated(
         path: PathBuf,
         storage_dir: &std::path::Path,
+    ) -> Result<Self> {
+        Self::from_policy_dir_isolated_with_options(path, storage_dir, false).await
+    }
+
+    pub async fn from_policy_dir_isolated_with_options(
+        path: PathBuf,
+        storage_dir: &std::path::Path,
+        deterministic_only: bool,
     ) -> Result<Self> {
         let entity_store = EntityStore::open(storage_dir.join("entities")).context(format!(
             "Failed to open entity store: {}",
@@ -71,13 +82,14 @@ impl CedarPolicyHarness {
             .await
             .context("Failed to open in-memory trajectory store")?;
 
-        Self::build(path, entity_store, trajectory_store).await
+        Self::build(path, entity_store, trajectory_store, deterministic_only).await
     }
 
     async fn build(
         path: PathBuf,
         entity_store: EntityStore,
         trajectory_store: TrajectoryStore,
+        deterministic_only: bool,
     ) -> Result<Self> {
         anyhow::ensure!(
             path.is_dir(),
@@ -171,11 +183,20 @@ impl CedarPolicyHarness {
         entity_store.upsert(&internal_label)?;
         entity_store.upsert(&public_label)?;
 
-        let data_model_path = path.join("ifc.toml");
-        let data_model = DataModel::from_toml(data_model_path)?;
+        let data_model = if deterministic_only {
+            tracing::info!("Deterministic-only mode: LLM classifiers disabled");
+            None
+        } else {
+            let data_model_path = path.join("ifc.toml");
+            Some(DataModel::from_toml(data_model_path)?)
+        };
 
-        let policy_model_path = path.join("policies.toml");
-        let policy_model = PolicyModel::from_toml(policy_model_path)?;
+        let policy_model = if deterministic_only {
+            None
+        } else {
+            let policy_model_path = path.join("policies.toml");
+            Some(PolicyModel::from_toml(policy_model_path)?)
+        };
 
         Ok(Self {
             authorizer: Authorizer::new(),
@@ -354,5 +375,128 @@ impl Harness for CedarPolicyHarness {
             .await?;
 
         Ok(adjudicated)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        Action, Agent, Control, Decision, Event, Harness, ShellCommand, Started, TrajectoryEvent,
+    };
+    use std::path::PathBuf;
+
+    const POLICIES_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../policies");
+
+    fn test_agent() -> Agent {
+        Agent {
+            id: "test-agent".to_string(),
+            provider_id: "test-provider".to_string(),
+        }
+    }
+
+    fn raw_context() -> serde_json::Value {
+        serde_json::json!({
+            "cwd": "/tmp/test",
+            "permission_mode": "default",
+            "transcript_path": "/tmp/test-transcript.jsonl",
+        })
+    }
+
+    async fn load_deterministic() -> (CedarPolicyHarness, tempfile::TempDir) {
+        let path = PathBuf::from(POLICIES_DIR);
+        let temp_dir = tempfile::tempdir().expect("should create temp dir");
+        let harness =
+            CedarPolicyHarness::from_policy_dir_isolated_with_options(path, temp_dir.path(), true)
+                .await
+                .expect("should load policies in deterministic-only mode");
+        (harness, temp_dir)
+    }
+
+    #[tokio::test]
+    async fn loads_deterministic_only() {
+        let (harness, _temp_dir) = load_deterministic().await;
+        assert!(
+            harness.data_model.is_none(),
+            "data_model should be None in deterministic-only mode"
+        );
+        assert!(
+            harness.policy_model.is_none(),
+            "policy_model should be None in deterministic-only mode"
+        );
+    }
+
+    #[tokio::test]
+    async fn deterministic_allows_started_event() {
+        let (harness, _temp_dir) = load_deterministic().await;
+        let trajectory_id = format!("test-deterministic-{}", uuid::Uuid::new_v4());
+        let started = TrajectoryEvent::Control(Control::Started(Started::new("test-agent")));
+        let event = Event::new(test_agent(), &trajectory_id, started).with_raw(raw_context());
+        let result = harness.adjudicate(event).await.unwrap();
+        assert_eq!(
+            result.decision,
+            Decision::Allow,
+            "Started events should always be allowed"
+        );
+    }
+
+    #[tokio::test]
+    async fn deterministic_adjudicates_shell_command() {
+        let (harness, _temp_dir) = load_deterministic().await;
+        let trajectory_id = format!("test-shell-{}", uuid::Uuid::new_v4());
+
+        let started = TrajectoryEvent::Control(Control::Started(Started::new("test-agent")));
+        let event = Event::new(test_agent(), &trajectory_id, started).with_raw(raw_context());
+        harness.adjudicate(event).await.unwrap();
+
+        let shell = TrajectoryEvent::Action(Action::ShellCommand(
+            ShellCommand::new("ls /tmp").with_cwd("/tmp"),
+        ));
+        let event = Event::new(test_agent(), &trajectory_id, shell).with_raw(raw_context());
+        let result = harness.adjudicate(event).await.unwrap();
+        assert_eq!(
+            result.decision,
+            Decision::Allow,
+            "benign ls should be allowed in deterministic-only mode"
+        );
+    }
+
+    #[tokio::test]
+    async fn deterministic_denies_destructive_command() {
+        let (harness, _temp_dir) = load_deterministic().await;
+        let trajectory_id = format!("test-destructive-{}", uuid::Uuid::new_v4());
+
+        let started = TrajectoryEvent::Control(Control::Started(Started::new("test-agent")));
+        let event = Event::new(test_agent(), &trajectory_id, started).with_raw(raw_context());
+        harness.adjudicate(event).await.unwrap();
+
+        let shell = TrajectoryEvent::Action(Action::ShellCommand(
+            ShellCommand::new("rm -rf /").with_cwd("/tmp"),
+        ));
+        let event = Event::new(test_agent(), &trajectory_id, shell).with_raw(raw_context());
+        let result = harness.adjudicate(event).await.unwrap();
+        assert_eq!(
+            result.decision,
+            Decision::Deny,
+            "rm -rf / should be denied by Cedar policy even without LLM"
+        );
+    }
+
+    #[tokio::test]
+    async fn loads_with_llm_by_default() {
+        let path = PathBuf::from(POLICIES_DIR);
+        let temp_dir = tempfile::tempdir().expect("should create temp dir");
+        let harness =
+            CedarPolicyHarness::from_policy_dir_isolated_with_options(path, temp_dir.path(), false)
+                .await
+                .expect("should load policies with LLM enabled");
+        assert!(
+            harness.data_model.is_some(),
+            "data_model should be Some when deterministic_only is false"
+        );
+        assert!(
+            harness.policy_model.is_some(),
+            "policy_model should be Some when deterministic_only is false"
+        );
     }
 }

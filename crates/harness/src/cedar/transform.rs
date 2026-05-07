@@ -7,8 +7,37 @@ use anyhow::Result;
 use cedar_policy::{Context, Request};
 use serde::Serialize;
 use sondera_information_flow_control::Label;
+use sondera_policy::PolicyClassification;
 use std::path::Path;
-use tracing::debug;
+use tracing::{debug, warn};
+
+impl CedarPolicyHarness {
+    async fn classify_graceful(&self, content: &str) -> Label {
+        match self.data_model.as_ref() {
+            Some(model) => match model.classify(content).await {
+                Ok(classification) => classification.max_label(),
+                Err(e) => {
+                    warn!("Data classification failed, defaulting to Public: {}", e);
+                    Label::default()
+                }
+            },
+            None => Label::default(),
+        }
+    }
+
+    async fn evaluate_policy_graceful(&self, content: &str) -> PolicyClassification {
+        match self.policy_model.as_ref() {
+            Some(model) => match model.evaluate_content(content).await {
+                Ok(classification) => classification,
+                Err(e) => {
+                    warn!("Policy evaluation failed, defaulting to compliant: {}", e);
+                    PolicyClassification::default()
+                }
+            },
+            None => PolicyClassification::default(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 struct WorkspaceContext {
@@ -127,7 +156,7 @@ impl CedarPolicyHarness {
                 let categories: Vec<&str> = sig.categories.iter().map(|s| s.as_str()).collect();
 
                 // Get the max sensitivity label of Message.
-                let label = self.data_model.classify(&prompt.content).await?.max_label();
+                let label = self.classify_graceful(&prompt.content).await;
                 let label_id = euid("Label", &label.to_string())?;
 
                 // Build Message entity and add to store.
@@ -193,10 +222,10 @@ impl CedarPolicyHarness {
                 let categories: Vec<&str> = sig.categories.iter().map(|s| s.as_str()).collect();
 
                 // Classify the sensitivity of combined content.
-                let label = self.data_model.classify(&scannable).await?.max_label();
+                let label = self.classify_graceful(&scannable).await;
                 let label_id = euid("Label", &label.to_string())?;
 
-                let policy_classification = self.policy_model.evaluate_content(&scannable).await?;
+                let policy_classification = self.evaluate_policy_graceful(&scannable).await;
 
                 let context_value = serde_json::json!({
                     "workspace": workspace_ctx,
@@ -224,11 +253,11 @@ impl CedarPolicyHarness {
                 let categories: Vec<&str> = sig.categories.iter().map(|s| s.as_str()).collect();
 
                 // Classify the sensitivity of content.
-                let label = self.data_model.classify(&content).await?.max_label();
+                let label = self.classify_graceful(&content).await;
                 let label_id = euid("Label", &label.to_string())?;
 
                 // Evaluate content against policy model.
-                let policy_classification = self.policy_model.evaluate_content(&content).await?;
+                let policy_classification = self.evaluate_policy_graceful(&content).await;
 
                 let context_value = serde_json::json!({
                     "workspace": workspace_ctx,
@@ -266,11 +295,11 @@ impl CedarPolicyHarness {
                 let categories: Vec<&str> = sig.categories.iter().map(|s| s.as_str()).collect();
 
                 // Classify data sensitivity.
-                let label = self.data_model.classify(&scannable).await?.max_label();
+                let label = self.classify_graceful(&scannable).await;
                 let label_id = euid("Label", &label.to_string())?;
 
                 // Evaluate against policy model.
-                let policy_classification = self.policy_model.evaluate_content(&scannable).await?;
+                let policy_classification = self.evaluate_policy_graceful(&scannable).await;
 
                 // Create/update File entity with label.
                 let file_id = euid("File", &fo.path)?;
@@ -309,12 +338,12 @@ impl CedarPolicyHarness {
                 let categories: Vec<&str> = sig.categories.iter().map(|s| s.as_str()).collect();
 
                 // Classify the sensitivity of output content.
-                let label = self.data_model.classify(&content).await?.max_label();
+                let label = self.classify_graceful(&content).await;
                 let label_id = euid("Label", &label.to_string())?;
                 mark_trajectory_label(label)?;
 
                 // Evaluate output content against policy model.
-                let policy_classification = self.policy_model.evaluate_content(&content).await?;
+                let policy_classification = self.evaluate_policy_graceful(&content).await;
 
                 let context_value = serde_json::json!({
                     "workspace": workspace_ctx,
@@ -348,12 +377,12 @@ impl CedarPolicyHarness {
                 let categories: Vec<&str> = sig.categories.iter().map(|s| s.as_str()).collect();
 
                 // Classify the sensitivity of result content.
-                let label = self.data_model.classify(&wfo.result).await?.max_label();
+                let label = self.classify_graceful(&wfo.result).await;
                 let label_id = euid("Label", &label.to_string())?;
                 mark_trajectory_label(label)?;
 
                 // Evaluate result content against policy model.
-                let policy_classification = self.policy_model.evaluate_content(&wfo.result).await?;
+                let policy_classification = self.evaluate_policy_graceful(&wfo.result).await;
 
                 let context_value = serde_json::json!({
                     "workspace": workspace_ctx,
@@ -390,14 +419,14 @@ impl CedarPolicyHarness {
                 let categories: Vec<&str> = sig.categories.iter().map(|s| s.as_str()).collect();
 
                 // Classify sensitivity of result content.
-                let label = self.data_model.classify(content).await?.max_label();
+                let label = self.classify_graceful(content).await;
                 let label_id = euid("Label", &label.to_string())?;
 
                 // Taint trajectory with file content label.
                 mark_trajectory_label(label)?;
 
                 // Evaluate result content against policy model.
-                let policy_classification = self.policy_model.evaluate_content(content).await?;
+                let policy_classification = self.evaluate_policy_graceful(content).await;
 
                 // Update File entity label if we have a path.
                 if !path.is_empty() {
@@ -441,12 +470,12 @@ impl CedarPolicyHarness {
                 let categories: Vec<&str> = sig.categories.iter().map(|s| s.as_str()).collect();
 
                 // Classify the sensitivity of output content.
-                let label = self.data_model.classify(&content).await?.max_label();
+                let label = self.classify_graceful(&content).await;
                 let label_id = euid("Label", &label.to_string())?;
                 mark_trajectory_label(label)?;
 
                 // Evaluate output content against policy model.
-                let policy_classification = self.policy_model.evaluate_content(&content).await?;
+                let policy_classification = self.evaluate_policy_graceful(&content).await;
 
                 let context_value = serde_json::json!({
                     "workspace": workspace_ctx,

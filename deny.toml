@@ -43,6 +43,8 @@ ignore = [
     "RUSTSEC-2025-0134",
     # Transitive dependency advisory (no fix available)
     "RUSTSEC-2026-0006",
+    # Transitive via yara-x -> wasmtime (table allocation panic, pinned by yara-x)
+    "RUSTSEC-2026-0114",
 ]
 
 [sources]
