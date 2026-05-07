@@ -18,6 +18,16 @@ and [Gemini CLI](https://geminicli.com/docs/hooks/).
 
 ### Prerequisites
 
+Install [Rust](https://www.rust-lang.org/) and Cargo using rustup:
+
+```bash
+# Install Rust and Cargo
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Verify installation
+cargo --version
+```
+
 The YARA signature engine and Cedar policies work without any external
 dependencies. The LLM-based classifiers (data sensitivity and secure code
 policy) require [Ollama](https://ollama.com/) with the `gpt-oss-safeguard-20b`
@@ -28,7 +38,7 @@ model:
 brew install ollama
 
 # Pull the model (~12 GB)
-ollama pull gpt-oss-safeguard-20b
+ollama pull gpt-oss-safeguard
 ```
 
 ### 1. Start the harness server
