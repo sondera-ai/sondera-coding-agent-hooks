@@ -1,0 +1,14 @@
+{
+  "timestamp": 1778700006000,
+  "cwd": "/tmp/investment-agent-demo",
+  "sessionId": "investment-copilot-demo",
+  "toolName": "bash",
+  "toolArgs": {
+    "command": "python scripts/portfolio_report.py --customer CUST001 --include-account-number"
+  },
+  "toolError": {
+    "stderr": "policy denied access to account_number",
+    "exit_code": 2
+  },
+  "exitCode": 2
+}

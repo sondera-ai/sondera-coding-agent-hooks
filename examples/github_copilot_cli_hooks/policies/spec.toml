@@ -1,0 +1,7 @@
+id = "investment-copilot-cli-hooks"
+hierarchy = "principal"
+
+[metadata]
+display_name = "Investment Copilot CLI Hooks"
+description = "Govern-mode policy pack for the GitHub Copilot CLI hook investment example."
+category = "example"

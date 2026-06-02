@@ -123,6 +123,15 @@ Write your own `.cedar` files into this directory to add custom rules. The
 harness evaluates all policies on every hook event — a single matching `forbid`
 overrides any `permit`.
 
+### 4. Examples
+
+The `examples/` directory contains standalone policies, payloads, and runnable
+hook examples.
+
+- [GitHub Copilot CLI hook enforcement](examples/github_copilot_cli_hooks/README.md)
+  shows a local `sondera copilot ...` hook path with fixture payloads, an
+  investment-advisor Cedar policy pack, and a smoke script.
+
 ## Architecture
 
 ![Architecture](docs/architecture.png)

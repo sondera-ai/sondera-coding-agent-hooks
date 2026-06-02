@@ -1,0 +1,122 @@
+{
+  "version": 1,
+  "disableAllHooks": false,
+  "hooks": {
+    "agentStop": [
+      {
+        "type": "command",
+        "bash": "sondera copilot agent-stop",
+        "powershell": "sondera.exe copilot agent-stop",
+        "timeoutSec": 30
+      }
+    ],
+    "errorOccurred": [
+      {
+        "type": "command",
+        "bash": "sondera copilot error-occurred",
+        "powershell": "sondera.exe copilot error-occurred",
+        "timeoutSec": 30
+      }
+    ],
+    "notification": [
+      {
+        "type": "command",
+        "bash": "sondera copilot notification",
+        "powershell": "sondera.exe copilot notification",
+        "timeoutSec": 30
+      }
+    ],
+    "permissionRequest": [
+      {
+        "type": "command",
+        "bash": "sondera copilot permission-request",
+        "powershell": "sondera.exe copilot permission-request",
+        "matcher": {
+          "toolName": "bash"
+        },
+        "timeoutSec": 30
+      }
+    ],
+    "postToolUse": [
+      {
+        "type": "command",
+        "bash": "sondera copilot post-tool-use",
+        "powershell": "sondera.exe copilot post-tool-use",
+        "matcher": {
+          "toolName": "bash"
+        },
+        "timeoutSec": 30
+      }
+    ],
+    "postToolUseFailure": [
+      {
+        "type": "command",
+        "bash": "sondera copilot post-tool-use-failure",
+        "powershell": "sondera.exe copilot post-tool-use-failure",
+        "matcher": {
+          "toolName": "bash"
+        },
+        "timeoutSec": 30
+      }
+    ],
+    "preCompact": [
+      {
+        "type": "command",
+        "bash": "sondera copilot pre-compact",
+        "powershell": "sondera.exe copilot pre-compact",
+        "timeoutSec": 30
+      }
+    ],
+    "preToolUse": [
+      {
+        "type": "command",
+        "bash": "sondera copilot pre-tool-use",
+        "powershell": "sondera.exe copilot pre-tool-use",
+        "matcher": {
+          "toolName": "bash"
+        },
+        "timeoutSec": 30
+      }
+    ],
+    "sessionEnd": [
+      {
+        "type": "command",
+        "bash": "sondera copilot session-end",
+        "powershell": "sondera.exe copilot session-end",
+        "timeoutSec": 30
+      }
+    ],
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "sondera copilot session-start",
+        "powershell": "sondera.exe copilot session-start",
+        "timeoutSec": 30
+      }
+    ],
+    "subagentStart": [
+      {
+        "type": "command",
+        "bash": "sondera copilot subagent-start",
+        "powershell": "sondera.exe copilot subagent-start",
+        "timeoutSec": 30
+      }
+    ],
+    "subagentStop": [
+      {
+        "type": "command",
+        "bash": "sondera copilot subagent-stop",
+        "powershell": "sondera.exe copilot subagent-stop",
+        "timeoutSec": 30
+      }
+    ],
+    "userPromptSubmitted": [
+      {
+        "type": "command",
+        "bash": "sondera copilot user-prompt-submitted",
+        "powershell": "sondera.exe copilot user-prompt-submitted",
+        "timeoutSec": 30
+      }
+    ]
+  }
+}

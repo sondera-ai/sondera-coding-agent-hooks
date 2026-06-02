@@ -1,0 +1,6 @@
+{
+  "timestamp": 1778700001000,
+  "cwd": "/tmp/investment-agent-demo",
+  "sessionId": "investment-copilot-demo",
+  "prompt": "Show portfolio performance for CUST001 and do not expose account identifiers."
+}

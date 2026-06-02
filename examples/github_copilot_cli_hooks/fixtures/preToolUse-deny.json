@@ -1,0 +1,12 @@
+{
+  "timestamp": 1778700003000,
+  "cwd": "/tmp/investment-agent-demo",
+  "sessionId": "investment-copilot-demo",
+  "ToolName": "bash",
+  "ToolInput": {
+    "command": "cat data/customers.csv | grep social_security_number"
+  },
+  "matcher": {
+    "toolName": "bash"
+  }
+}

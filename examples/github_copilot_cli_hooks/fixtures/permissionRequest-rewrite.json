@@ -1,0 +1,11 @@
+{
+  "timestamp": 1778700005000,
+  "cwd": "/tmp/investment-agent-demo",
+  "sessionId": "investment-copilot-demo",
+  "toolName": "bash",
+  "toolArgs": "{\"command\":\"python scripts/portfolio_report.py --customer CUST001 --include-account-number\"}",
+  "matcher": {
+    "toolName": "bash"
+  },
+  "reason": "Copilot is asking whether it may run a command that includes account identifiers."
+}

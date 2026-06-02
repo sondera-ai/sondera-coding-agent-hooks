@@ -1,0 +1,7 @@
+{
+  "timestamp": 1778700000000,
+  "cwd": "/tmp/investment-agent-demo",
+  "sessionId": "investment-copilot-demo",
+  "source": "new",
+  "initialPrompt": "Review the demo portfolio for CUST001 using read-only commands."
+}
