@@ -1,0 +1,26 @@
+[package]
+name = "sondera-seed"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Dev/demo seed-replay tool: loads sample trajectories into Sondera's trajectory stores (NOT a production binary)"
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "sondera-seed"
+path = "src/main.rs"
+
+[dependencies]
+sondera-harness = { workspace = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+clap = { version = "4.5", features = ["derive", "env"] }
+anyhow = "1.0"
+serde_json = { version = "1.0", features = ["preserve_order"] }
+uuid = { version = "1.0", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3"

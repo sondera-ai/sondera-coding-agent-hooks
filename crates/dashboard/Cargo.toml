@@ -1,0 +1,38 @@
+[package]
+name = "sondera-dashboard"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Read-only trajectory dashboard API for AI agent governance"
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "sondera-dashboard"
+path = "src/bin/server.rs"
+
+[dependencies]
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+subtle = "2"
+turso = "0.4"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
+notify = "8"
+futures = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4.5", features = ["derive", "env"] }
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dirs = "6"
+sondera-harness = { workspace = true }
+sondera-hooks-common = { workspace = true }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+tokio = { version = "1", features = ["io-util"] }
+tokio-tungstenite = "0.28"
+tempfile = "3"
+uuid = { version = "1.0", features = ["v4"] }
