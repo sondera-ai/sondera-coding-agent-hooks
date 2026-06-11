@@ -51,6 +51,11 @@ entity Trajectory = {
     step_count: Long,
     label: Label,
     taints: Set<Taint>,
+    // The multi-hop monitor's derived Armed-or-Violated fact: true while an
+    // untrusted read awaits approval (or has already been violated). Always
+    // written by the harness on every adjudicated event — required (no `?`)
+    // because Cedar fails OPEN on a missing entity attribute.
+    untrusted_pending: Bool,
 };
 
 // A file being read, written, edited, or deleted by the agent.
@@ -136,7 +141,11 @@ type ShellCommandContext = {
     // The shell command string to be executed.
     command: String,
     // Working directory for command execution.
-    working_dir: String
+    working_dir: String,
+    // True when this event WRITES to a protected path, as computed by the
+    // monitor's is_protected_write predicate (glob set + shell
+    // write-heuristic) — the single source of truth.
+    protected_path: Bool,
 };
 
 action "ShellCommand" appliesTo {
@@ -229,6 +238,15 @@ type FileOperationContext = {
     path: String,
     // Operation type: "Read", "Write", "Edit", or "Delete".
     operation: String,
+    // True when this event WRITES to a protected path, as computed by the
+    // monitor's is_protected_write predicate (glob set + shell
+    // write-heuristic) — the single source of truth. False by predicate
+    // design for Read/Delete operations.
+    protected_path: Bool,
+    // The trajectory's multi-hop Armed-or-Violated fact, duplicated into
+    // context because the File resource is keyed globally by path and
+    // cannot reach the Trajectory entity.
+    untrusted_pending: Bool,
 };
 
 action "FileRead" appliesTo {

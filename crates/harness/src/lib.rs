@@ -22,6 +22,7 @@
 
 mod cedar;
 mod harness;
+pub mod monitors;
 pub mod rpc;
 pub mod storage;
 mod types;
@@ -33,6 +34,10 @@ pub use types::*;
 pub use cedar::CedarPolicyHarness;
 pub use cedar::entity::{EntityBuilder, Trajectory, euid, json_to_restricted_expr};
 pub use harness::Harness;
+pub use monitors::{
+    Monitor, MonitorAttributes, MonitorConfig, MonitorSnapshot, MonitorState,
+    UntrustedThenProtectedWrite, Verdict,
+};
 pub use rpc::HarnessClient;
 pub use sondera_information_flow_control::Label;
 

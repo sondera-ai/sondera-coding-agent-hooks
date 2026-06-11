@@ -10,6 +10,10 @@ pub struct Trajectory {
     pub step_count: i64,
     pub label: Label,
     pub taints: Vec<String>,
+    /// Multi-hop monitor's derived Armed-or-Violated fact. Always written
+    /// unconditionally by `into_entity` — Cedar has no attribute defaults and
+    /// a missing entity attribute fails open.
+    pub untrusted_pending: bool,
 }
 
 impl Trajectory {
@@ -19,6 +23,7 @@ impl Trajectory {
             step_count: 0,
             label: Label::default(),
             taints: Vec::new(),
+            untrusted_pending: false,
         }
     }
 }
@@ -35,6 +40,9 @@ impl Trajectory {
         }
         EntityBuilder::from_type_and_id("Trajectory", &self.trajectory_id)?
             .long("step_count", self.step_count)
+            // Unconditional write: Cedar has no attribute defaults — a missing
+            // entity attribute fails open.
+            .bool("untrusted_pending", self.untrusted_pending)
             .entity_ref("label", "Label", &self.label.to_string())?
             .entity_set("taints", &taint_refs)
             .build()
@@ -54,6 +62,17 @@ impl TryFrom<Entity> for Trajectory {
                 _ => None,
             })
             .unwrap_or(0);
+
+        // Older stored entities have no untrusted_pending attribute; default
+        // false keeps them deserializing.
+        let untrusted_pending = entity
+            .attr("untrusted_pending")
+            .and_then(|r| r.ok())
+            .and_then(|v| match v {
+                EvalResult::Bool(b) => Some(b),
+                _ => None,
+            })
+            .unwrap_or(false);
 
         let label = entity
             .attr("label")
@@ -86,6 +105,7 @@ impl TryFrom<Entity> for Trajectory {
             step_count,
             label,
             taints,
+            untrusted_pending,
         })
     }
 }

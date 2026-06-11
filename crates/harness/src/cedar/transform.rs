@@ -79,7 +79,22 @@ fn parse_file_paths(command: &str) -> Vec<String> {
 
 impl CedarPolicyHarness {
     /// Build a Cedar authorization request from an Event.
-    pub(super) async fn build_request(&self, event: &Event) -> Result<Request> {
+    ///
+    /// `untrusted_pending` is the multi-hop monitor's derived Armed-or-Violated
+    /// fact, written onto the Trajectory entity in the centralized seam below.
+    pub(super) async fn build_request(
+        &self,
+        event: &Event,
+        untrusted_pending: bool,
+    ) -> Result<Request> {
+        // Single source of truth: protected_path is computed by the same
+        // predicate (and startup-compiled glob set) the monitor FSM uses — no
+        // glob or shell-heuristic logic is re-implemented here.
+        let protected_path = crate::monitors::predicates::is_protected_write(
+            event,
+            &self.monitor_config,
+            &self.monitor_glob_set,
+        );
         let workspace_ctx = workspace_context(event);
         let principal_id = euid("Agent", &event.actor.id)?;
         let trajectory_id = euid("Trajectory", &event.trajectory_id)?;
@@ -98,8 +113,11 @@ impl CedarPolicyHarness {
         };
         let mut trajectory = Trajectory::try_from(trajectory_entity)?;
 
-        // Increment step count and persist for each adjudicated event.
+        // Increment step count, write the monitor-derived attribute, and
+        // persist for each adjudicated event — the one centralized place that
+        // mutates Trajectory adjudication state.
         trajectory.step_count += 1;
+        trajectory.untrusted_pending = untrusted_pending;
         self.entity_store
             .upsert(&trajectory.clone().into_entity()?)?;
 
@@ -202,6 +220,7 @@ impl CedarPolicyHarness {
                     "workspace": workspace_ctx,
                     "command": sc.command,
                     "working_dir": sc.working_dir,
+                    "protected_path": protected_path,
                     "label": label_id.to_json_value()?,
                     "policy": {
                         "compliant": policy_classification.compliant,
@@ -286,6 +305,8 @@ impl CedarPolicyHarness {
                     "workspace": workspace_ctx,
                     "path": fo.path,
                     "operation": fo.operation.to_string(),
+                    "protected_path": protected_path,
+                    "untrusted_pending": untrusted_pending,
                     "label": label_id.to_json_value()?,
                     "policy": {
                         "compliant": policy_classification.compliant,
