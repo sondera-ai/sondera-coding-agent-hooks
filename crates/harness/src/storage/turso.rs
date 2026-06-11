@@ -577,7 +577,7 @@ impl TrajectoryStore {
 
 /// Get the default database path, stored in the same directory as file storage.
 ///
-/// Returns `~/.sondera/trajectories/trajectories.db`
+/// Returns `~/.sondera/trajectories.db`
 pub fn get_default_db_path() -> Result<std::path::PathBuf> {
     let storage_dir = get_storage_dir()?;
     Ok(storage_dir.join("trajectories.db"))

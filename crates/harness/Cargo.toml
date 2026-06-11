@@ -15,6 +15,10 @@ crate-type = ["rlib"]
 name = "sondera-harness-server"
 path = "src/bin/server.rs"
 
+[[bin]]
+name = "sondera-approve"
+path = "src/bin/approve.rs"
+
 [dependencies]
 cedar-policy = { version = "4" }
 serde = { version = "1.0", features = ["derive"] }
@@ -29,15 +33,24 @@ fjall = "3"
 turso = "0.4"
 ollama-rs = { version = "0.3", features = [] }
 schemars = { version = "1.2", features = ["preserve_order"] }
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "net"] }
 thiserror = "2"
 tarpc = { version = "0.37", features = ["tokio1", "serde1", "serde-transport", "unix"] }
 tokio-serde = { version = "0.9", features = ["json"] }
 futures = "0.3"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-clap = { version = "4.5", features = ["derive"] }
+clap = { version = "4.5", features = ["derive", "env"] }
 shlex = "1"
+globset = "0.4"
+toml = "0.8"
+
+# HTTP control-plane surface for the `sondera-approve serve` mode only (the
+# harness server binary does not use these). Kept minimal so the server stays
+# lean; the dashboard remains read-only and unaware of this write path.
+axum = "0.8"
+tower-http = { version = "0.6", features = ["cors"] }
+subtle = "2"
 
 # Guardrail crates
 sondera-information-flow-control = { path = "../guardrails/ifc" }

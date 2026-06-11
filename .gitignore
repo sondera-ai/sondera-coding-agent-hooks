@@ -27,3 +27,6 @@ target
 
 # Debug
 *.log
+
+# Local planning / workspace artifacts
+.planning/

@@ -1,3 +1,4 @@
+use crate::monitors::MonitorState;
 use anyhow::{Context, Result};
 use cedar_policy::{Entities, Entity, EntityUid};
 use fjall::{Database, Keyspace};
@@ -7,13 +8,22 @@ use tracing::debug;
 pub struct EntityStore {
     db: Database,
     entities: Keyspace,
+    /// Dedicated keyspace for multi-hop monitor state, keyed by the plain
+    /// trajectory id. Never read by Cedar and invisible to
+    /// [`EntityStore::entities`], so the full Cedar scan is not inflated.
+    monitor_state: Keyspace,
 }
 
 impl EntityStore {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let db = Database::builder(path.as_ref()).open()?;
         let entities = db.keyspace("entities", fjall::KeyspaceCreateOptions::default)?;
-        Ok(Self { db, entities })
+        let monitor_state = db.keyspace("monitor_state", fjall::KeyspaceCreateOptions::default)?;
+        Ok(Self {
+            db,
+            entities,
+            monitor_state,
+        })
     }
 
     pub fn upsert(&self, entity: &Entity) -> Result<()> {
@@ -52,6 +62,32 @@ impl EntityStore {
         }
         debug!("entities: n={:?}", all.len());
         Ok(Entities::from_entities(all, None)?)
+    }
+
+    /// Load persisted multi-hop monitor state for a trajectory.
+    ///
+    /// O(1) keyed get on the dedicated `monitor_state` keyspace; the key is
+    /// the plain trajectory id. Returns `Ok(None)` for a trajectory that has
+    /// never been observed. Storage faults propagate as `anyhow::Error`.
+    pub fn get_monitor_state(&self, trajectory_id: &str) -> Result<Option<MonitorState>> {
+        let Some(bytes) = self.monitor_state.get(trajectory_id)? else {
+            return Ok(None);
+        };
+        let state: MonitorState =
+            serde_json::from_slice(&bytes).context("corrupt monitor state")?;
+        debug!("get_monitor_state: {:?}", trajectory_id);
+        Ok(Some(state))
+    }
+
+    /// Persist multi-hop monitor state for a trajectory.
+    ///
+    /// O(1) keyed put on the dedicated `monitor_state` keyspace, keyed by
+    /// the plain trajectory id. Storage faults propagate as `anyhow::Error`.
+    pub fn put_monitor_state(&self, trajectory_id: &str, state: &MonitorState) -> Result<()> {
+        let buf = serde_json::to_vec(state)?;
+        self.monitor_state.insert(trajectory_id, buf)?;
+        debug!("put_monitor_state: {:?}", trajectory_id);
+        Ok(())
     }
 
     pub fn persist(&self) -> Result<()> {

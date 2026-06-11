@@ -3,6 +3,10 @@ mod transform;
 
 use crate::cedar::entity::Trajectory;
 use crate::harness::Harness;
+use crate::monitors::{
+    Monitor, MonitorConfig, MonitorSnapshot, MonitorState, UntrustedThenProtectedWrite, Verdict,
+    backstop,
+};
 use crate::storage::entity::EntityStore;
 use crate::storage::file;
 use crate::storage::turso::{TrajectoryStore, get_default_db_path};
@@ -14,6 +18,7 @@ use cedar_policy::{
     Authorizer, Context, Entity, EntityId, EntityUid, PolicyId, PolicySet, Request, Response,
     Schema, SchemaFragment,
 };
+use globset::GlobSet;
 use sondera_information_flow_control::DataModel;
 use sondera_policy::PolicyModel;
 use std::collections::HashSet;
@@ -28,6 +33,8 @@ pub struct CedarPolicyHarness {
     policy_set: PolicySet,
     data_model: DataModel,
     policy_model: PolicyModel,
+    monitor_config: MonitorConfig,
+    monitor_glob_set: GlobSet,
 }
 
 impl CedarPolicyHarness {
@@ -177,6 +184,26 @@ impl CedarPolicyHarness {
         let policy_model_path = path.join("policies.toml");
         let policy_model = PolicyModel::from_toml(policy_model_path)?;
 
+        // Multi-hop monitor config: an absent monitor.toml silently uses
+        // built-in defaults; a present-but-malformed file is fatal at startup
+        // — identical posture to Cedar parse errors.
+        let monitor_toml = path.join("monitor.toml");
+        let monitor_config = if monitor_toml.exists() {
+            let content = std::fs::read_to_string(&monitor_toml)
+                .context(format!("Failed to read {}", monitor_toml.display()))?;
+            MonitorConfig::load_from_toml(&content)
+                .context(format!("Failed to parse {}", monitor_toml.display()))?
+        } else {
+            MonitorConfig::default()
+        };
+        // Compile configured protected-path globs once at startup (fatal on
+        // invalid patterns); the same compiled set is the single source of
+        // truth for both the monitor FSM and Cedar context population.
+        let monitor_glob_set = monitor_config.build_glob_set().context(format!(
+            "Invalid protected_path_globs in {}",
+            monitor_toml.display()
+        ))?;
+
         Ok(Self {
             authorizer: Authorizer::new(),
             entity_store,
@@ -185,6 +212,8 @@ impl CedarPolicyHarness {
             policy_set,
             data_model,
             policy_model,
+            monitor_config,
+            monitor_glob_set,
         })
     }
 
@@ -258,6 +287,16 @@ impl CedarPolicyHarness {
         self.entity_store.delete(&uid)?;
         Ok(())
     }
+
+    /// Load persisted multi-hop monitor state for a trajectory.
+    pub fn get_monitor_state(&self, trajectory_id: &str) -> Result<Option<MonitorState>> {
+        self.entity_store.get_monitor_state(trajectory_id)
+    }
+
+    /// Persist multi-hop monitor state for a trajectory.
+    pub fn put_monitor_state(&self, trajectory_id: &str, state: &MonitorState) -> Result<()> {
+        self.entity_store.put_monitor_state(trajectory_id, state)
+    }
 }
 
 impl Harness for CedarPolicyHarness {
@@ -278,6 +317,27 @@ impl Harness for CedarPolicyHarness {
         file::write_trajectory_event(&event)?;
         self.trajectory_store.insert_event(&event).await?;
 
+        // Ordering contract: load → observe → persist → write-attribute →
+        // build-request → is_authorized. The Control bypass sits between
+        // persist and write-attribute — Control events advance and persist the
+        // FSM but never reach Cedar.
+        let mut monitor = match self.entity_store.get_monitor_state(&event.trajectory_id)? {
+            Some(state) => {
+                UntrustedThenProtectedWrite::with_state(self.monitor_config.clone(), state)?
+            }
+            // First event of the trajectory: fresh (Clean) monitor.
+            None => UntrustedThenProtectedWrite::new(self.monitor_config.clone())?,
+        };
+        // Observe every ingested event, including Control events.
+        monitor.observe(&event)?;
+        // Persist unconditionally on every observe.
+        self.entity_store
+            .put_monitor_state(&event.trajectory_id, monitor.state())?;
+        debug!("Monitor state persisted: {:?}", monitor.state());
+        // Derive Armed-or-Violated via the public verdict API — mapping only
+        // Armed→true would let the tripping write itself through.
+        let untrusted_pending = matches!(monitor.verdict(), Verdict::Pending | Verdict::Violated);
+
         if let TrajectoryEvent::Control(control) = &event.event {
             if let Control::Started(_) = control {
                 debug!("Starting trajectory: {}", event.trajectory_id);
@@ -285,14 +345,100 @@ impl Harness for CedarPolicyHarness {
                 let trajectory = Trajectory::new(&event.trajectory_id);
                 self.upsert_entity(trajectory.into_entity()?)?;
             }
-            // Don't authorize control events.
+
+            // Synthetic snapshot record for state-changing Control events: the
+            // original event's dual-write above is untouched — this is a new
+            // record written after it, never instead of it. Started is the init
+            // snapshot and Resumed is the only FSM-transitioning Control
+            // variant; the others are observe-no-ops. The record is written
+            // directly to storage and never re-enters adjudicate, and
+            // Control::Adjudicated is itself an observe-no-op — no feedback
+            // loop. Actor::policy("monitor") discriminates this record from the
+            // Cedar path's Actor::policy("cedar"); deny/escalate counts are
+            // unaffected since the payload is an Allow.
+            if matches!(control, Control::Started(_) | Control::Resumed(_)) {
+                let trajectory: Trajectory = match self
+                    .entity_store
+                    .get(&euid("Trajectory", &event.trajectory_id)?)?
+                {
+                    Some(entity) => entity.try_into()?,
+                    None => {
+                        debug!(
+                            "Trajectory entity {:?} not found for snapshot record, creating.",
+                            &event.trajectory_id
+                        );
+                        Trajectory::new(&event.trajectory_id)
+                    }
+                };
+                // observe + persist already ran above, so the snapshot
+                // reflects the post-observe state (e.g. Resumed("user")
+                // clearing Armed shows "clean" with cleared_event_id set).
+                let snapshot = MonitorSnapshot::from_monitor(
+                    &monitor,
+                    untrusted_pending,
+                    trajectory.taints.clone(),
+                    trajectory.label,
+                );
+                let snapshot_event = Event::new(
+                    event.agent.clone(),
+                    &event.trajectory_id,
+                    TrajectoryEvent::Control(Control::Adjudicated(Adjudicated::allow())),
+                )
+                .with_actor(Actor::policy("monitor"))
+                .with_causality(Causality::default().caused_by(&event.event_id))
+                .with_raw(serde_json::json!({
+                    "monitor": serde_json::to_value(&snapshot)?,
+                }));
+                file::write_trajectory_event(&snapshot_event)?;
+                self.trajectory_store.insert_event(&snapshot_event).await?;
+            }
+
+            // Control events are not authorized; the snapshot record above is
+            // additive.
             return Ok(Adjudicated::allow());
         }
 
-        let request = self.build_request(&event).await?;
+        let request = self.build_request(&event, untrusted_pending).await?;
         let response = self.is_authorized(&request)?;
 
-        let adjudicated = self.response_to_adjudicated(&response);
+        // Verdict backstop, the single call site: merge runs before the
+        // raw/adjudicated_event build so the persisted record and the returned
+        // decision are the same post-merge struct.
+        let adjudicated = backstop::merge(
+            self.response_to_adjudicated(&response),
+            monitor.verdict(),
+            &monitor.attributes(),
+        );
+
+        // Latest trajectory entity — hoisted above the raw build so the mirror
+        // snapshot can carry taints/label. A functional no-op for existing
+        // behavior: post-`is_authorized`, build_request's centralized upsert
+        // has already refreshed step_count/untrusted_pending/label.
+        let trajectory: Trajectory = match self
+            .entity_store
+            .get(&euid("Trajectory", &event.trajectory_id)?)?
+        {
+            Some(entity) => entity.try_into()?,
+            None => {
+                debug!(
+                    "Trajectory entity {:?} not found after adjudication, creating.",
+                    &event.trajectory_id
+                );
+                Trajectory::new(&event.trajectory_id)
+            }
+        };
+        debug!("Trajectory: {:?}", trajectory);
+
+        // Mirror snapshot built from the same `monitor` binding alive since the
+        // observe block and the same `untrusted_pending` bool from the single
+        // derivation site — a re-loaded or pre-observe snapshot would be off by
+        // one event.
+        let snapshot = MonitorSnapshot::from_monitor(
+            &monitor,
+            untrusted_pending,
+            trajectory.taints.clone(),
+            trajectory.label,
+        );
 
         // Build raw payload capturing the Cedar request and response for the trajectory log.
         let errors: Vec<String> = response
@@ -317,6 +463,9 @@ impl Harness for CedarPolicyHarness {
                 "reason": reason_policies,
                 "errors": errors,
             },
+            // Place the serde-serialized typed MonitorSnapshot under its key —
+            // present on every Cedar-path record, Clean trajectories included.
+            "monitor": serde_json::to_value(&snapshot)?,
         });
 
         // Write the adjudication as a Control event on the same trajectory.
@@ -329,23 +478,7 @@ impl Harness for CedarPolicyHarness {
         .with_causality(Causality::default().caused_by(&event.event_id))
         .with_raw(raw);
 
-        // Latest trajectory entity.
-        let trajectory: Trajectory = match self
-            .entity_store
-            .get(&euid("Trajectory", &event.trajectory_id)?)?
-        {
-            Some(entity) => entity.try_into()?,
-            None => {
-                debug!(
-                    "Trajectory entity {:?} not found after adjudication, creating.",
-                    &event.trajectory_id
-                );
-                Trajectory::new(&event.trajectory_id)
-            }
-        };
-
         debug!("Adjudicated Event: {:?}", adjudicated_event);
-        debug!("Trajectory: {:?}", trajectory);
 
         // Write adjudication event to both storages
         file::write_trajectory_event(&adjudicated_event)?;

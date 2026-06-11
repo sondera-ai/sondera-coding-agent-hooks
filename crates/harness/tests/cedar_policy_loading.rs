@@ -41,6 +41,33 @@ async fn policies_have_id_annotations() {
 }
 
 #[tokio::test]
+async fn multi_hop_policies_are_loaded() {
+    let (harness, _temp_dir) = load_harness().await;
+
+    // Both multi-hop forbids in policies/multi_hop.cedar must auto-discover
+    // and register by their @id.
+    let shell_forbid = harness.policy_set().policy(
+        &"multi-hop-forbid-shell-protected-write-untrusted-pending"
+            .parse()
+            .unwrap(),
+    );
+    assert!(
+        shell_forbid.is_some(),
+        "expected policy with @id(\"multi-hop-forbid-shell-protected-write-untrusted-pending\") to be loaded"
+    );
+
+    let file_forbid = harness.policy_set().policy(
+        &"multi-hop-forbid-file-protected-write-untrusted-pending"
+            .parse()
+            .unwrap(),
+    );
+    assert!(
+        file_forbid.is_some(),
+        "expected policy with @id(\"multi-hop-forbid-file-protected-write-untrusted-pending\") to be loaded"
+    );
+}
+
+#[tokio::test]
 async fn schema_contains_expected_entity_types() {
     let (harness, _temp_dir) = load_harness().await;
 

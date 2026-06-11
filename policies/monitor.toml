@@ -1,0 +1,36 @@
+# Multi-Hop Monitor Configuration
+#
+# Configures the UntrustedThenProtectedWrite temporal monitor: which events
+# arm the monitor (untrusted reads), which paths are protected, and which
+# resume signals count as approval. Values below are the built-in defaults.
+#
+# Every field is OPTIONAL: absent fields take the built-in defaults, and an
+# absent file is also valid (the harness runs with all defaults). A file
+# that is present but malformed is FATAL at server startup — the harness
+# refuses to run with security configuration it cannot parse.
+
+# Shell command binaries whose output observations count as untrusted reads.
+shell_untrusted_commands = ["curl", "wget"]
+
+# Tool names whose output observations count as untrusted reads.
+tool_untrusted_names = ["mcp_fetch"]
+
+# Glob patterns identifying protected paths (secrets + infra/CI). "**/"-prefixed
+# so they match both relative and absolute paths (hook adapters report absolute
+# file paths): "**/.env" matches ".env", "sub/.env", and "/abs/.env".
+protected_path_globs = [
+    "**/.env",
+    "**/.env.*",
+    "**/.ssh/**",
+    "**/.aws/**",
+    "**/*.pem",
+    "**/id_rsa*",
+    "**/.github/workflows/**",
+    "**/Dockerfile*",
+    "/etc/**",
+]
+
+# resumed_by values accepted as approval signals that clear an Armed
+# monitor. Matching is exact and case-sensitive; any other value (e.g.
+# "system", "agent", "User") fails closed and does NOT count as approval.
+resume_approved_by = ["user"]

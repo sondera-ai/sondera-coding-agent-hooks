@@ -10,7 +10,9 @@ members = [
     "crates/guardrails/signature",
     "crates/harness",
     "crates/common",
+    "crates/dashboard",
     "crates/mcp",
+    "crates/seed",
 ]
 
 [workspace.package]
