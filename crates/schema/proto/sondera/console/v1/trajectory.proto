@@ -1,0 +1,235 @@
+syntax = "proto3";
+
+package sondera.console.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+import "sondera/harness/v1/trajectory.proto";
+
+// Console BFF surface for trajectories. The harness owns writes to the
+// trajectory ledger; this surface is read-only.
+//
+// The event payload and the scan/adjudication types are `sondera.harness.v1`
+// messages (harness/v1/trajectory.proto), reused here rather than duplicated as
+// a second copy of the event model.
+
+message SparklineCell {
+  SparklineEventKind kind = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  int64 duration_ms = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Identifier (or description) of the policy that fired on this cell's action.
+  // Adjudications are not standalone cells: a deny/escalate verdict is folded
+  // onto the cell of the action it governed, which then carries the policy id
+  // here. Empty unless `decision` is a fire.
+  string policy_hit = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // The adjudication verdict folded onto this cell's action, set only when a
+  // deny/escalate adjudication governed it. DECISION_UNSPECIFIED for ordinary
+  // work (no fire). Lets the strip overlay deny (red) / escalate (yellow) on
+  // the exact action that tripped a policy.
+  sondera.harness.v1.Decision decision = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+message TrajectorySparkline {
+  string trajectory = 1 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "sondera.ai/Trajectory"
+  ];
+  repeated SparklineCell cells = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  sondera.harness.v1.Decision decision = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  bool truncated = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Summary-grained trajectory projection for list, stream, and detail headers.
+message TrajectorySummary {
+  option (google.api.resource) = {
+    type: "sondera.ai/Trajectory"
+    pattern: "trajectories/{trajectory}"
+    singular: "trajectory"
+    plural: "trajectories"
+  };
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  string agent = 2 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "sondera.ai/Agent"
+  ];
+  google.protobuf.Timestamp started_at = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  int64 duration_ms = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  sondera.harness.v1.Decision decision = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Number of *visible* events: the adjudication and scan control events folded
+  // onto the actions they describe are not counted, so this matches what
+  // ListTrajectoryEvents pages through.
+  int32 event_count = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  repeated string policy_hits = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  double score = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  string summary = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Persisted harness lifecycle status (pending/running/completed/failed/
+  // terminated/suspended). String-shaped to preserve the canonical Rust enum,
+  // including `terminated`, which the core proto enum does not expose.
+  string status = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  google.protobuf.Timestamp update_time = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Latest hierarchical transcript digest for this trajectory, projected from
+  // the `transcript_digest_results` table. Absent until the trajectory scanner
+  // has produced a digest — which is the permanent state when no scanner is
+  // configured, and the normal state for a run still in flight.
+  //
+  // Populated on the list projection as well as on detail reads: the list backs
+  // an activity feed that renders the scanner's title, and `summary` above
+  // follows this digest's title whenever there is one. A run accumulates
+  // several digests over its lifetime (interim refreshes plus a terminal one);
+  // the most recently written wins.
+  optional sondera.harness.v1.TranscriptDigest digest = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Latest transcript-level behavioral scan for this trajectory, projected from
+  // the `transcript_scan_results` table, paired with the id of the event that
+  // triggered it. Absent until the scanner has produced one; unlike `digest`
+  // this is terminal-only, since a run still in flight has not finished
+  // behaving. Populated on both the list and detail projections.
+  optional sondera.harness.v1.TranscriptScan scan = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Stored event row for a trajectory detail table / live tail.
+message TrajectoryEvent {
+  option (google.api.resource) = {
+    type: "sondera.ai/TrajectoryEvent"
+    pattern: "trajectories/{trajectory}/events/{event}"
+    singular: "trajectoryEvent"
+    plural: "trajectoryEvents"
+  };
+  reserved 7;
+  reserved "event_type";
+
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  string trajectory = 2 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "sondera.ai/Trajectory"
+  ];
+  string event_id = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  string agent = 4 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (google.api.resource_reference).type = "sondera.ai/Agent"
+  ];
+  google.protobuf.Timestamp timestamp = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  TrajectoryEventCategory category = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  sondera.harness.v1.TrajectoryEvent payload = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  string actor = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  string correlation_id = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  string causation_id = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  string parent_id = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+message GetTrajectoryRequest {
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sondera.ai/Trajectory"
+  ];
+}
+
+message ListTrajectoryEventsRequest {
+  string trajectory = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sondera.ai/Trajectory"
+  ];
+  int32 page_size = 2 [(google.api.field_behavior) = OPTIONAL];
+  string page_token = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// A stored trajectory event paired with the adjudication it triggered and the
+// per-event scanner summary, when present. The harness emits `Adjudicated` and
+// `Scanned` control events causally linked to the source event; this surface
+// folds them back onto the event so a detail table can render the decision and
+// summary inline instead of paginating the hidden control events separately.
+message TrajectoryEventDetail {
+  // The source trajectory event (action, observation, lifecycle, or state).
+  TrajectoryEvent event = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Policy adjudication produced for this event, when one was recorded.
+  sondera.harness.v1.Adjudicated adjudication = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Per-event scanner summary, when the trajectory scanner has analysed this
+  // event, projected from the `event_scan_results` table. The `embedding`
+  // vector is never populated on this surface: it is large, and no console
+  // view reads it.
+  optional sondera.harness.v1.EventScanResult summary = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+message ListTrajectoryEventsResponse {
+  repeated TrajectoryEventDetail details = 1;
+  string next_page_token = 2;
+  int32 total_size = 3;
+}
+
+message ListTrajectoriesRequest {
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Whitespace-separated `key=value` clauses: `agent=agents/{agent}`,
+  // `decision=allow|deny|escalate`, and
+  // `status=pending|running|completed|failed|terminated|suspended`. An
+  // unrecognized key is INVALID_ARGUMENT rather than a silent no-op.
+  string filter = 3 [(google.api.field_behavior) = OPTIONAL];
+  // `{field}` or `{field} asc|desc`, over `start_time` (default, descending),
+  // `update_time`, or `event_count`.
+  string order_by = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+message ListTrajectoriesResponse {
+  repeated TrajectorySummary trajectories = 1;
+  string next_page_token = 2;
+  int32 total_size = 3;
+}
+
+message BatchGetTrajectorySparklinesRequest {
+  repeated string names = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sondera.ai/Trajectory"
+  ];
+}
+
+message BatchGetTrajectorySparklinesResponse {
+  repeated TrajectorySparkline sparklines = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+message StreamTrajectoriesRequest {
+  // Same clauses as ListTrajectories.filter.
+  string filter = 1 [(google.api.field_behavior) = OPTIONAL];
+}
+
+message StreamTrajectoryRequest {
+  string trajectory = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sondera.ai/Trajectory"
+  ];
+}
+
+// UI event-strip vocabulary consumed by the console's trajectory sparkline.
+//
+// The strip is a distillation, not a 1:1 event replay. Prompts are split by
+// who spoke (user input vs. model-side turn); adjudications and transcript
+// scans are never their own cells (a fire folds onto SparklineCell.decision of
+// the governed action); control lifecycle collapses to two bookends (first
+// start, last terminal) carried as CONTROL. There is therefore no POLICY kind:
+// a policy fire is the `decision` field on an action cell, not a kind.
+enum SparklineEventKind {
+  SPARKLINE_EVENT_KIND_UNSPECIFIED = 0;
+  // Prompt authored by the user (PromptRole::User) — task / human input.
+  SPARKLINE_EVENT_KIND_PROMPT_USER = 1;
+  // Model-side prompt turn (PromptRole::Assistant or System) — model output or
+  // system instructions feeding the model.
+  SPARKLINE_EVENT_KIND_PROMPT_MODEL = 2;
+  SPARKLINE_EVENT_KIND_THOUGHT = 3;
+  SPARKLINE_EVENT_KIND_TOOL = 4;
+  SPARKLINE_EVENT_KIND_SHELL = 5;
+  SPARKLINE_EVENT_KIND_WEB = 6;
+  SPARKLINE_EVENT_KIND_FILE = 7;
+  // First start / last terminal lifecycle bookend (started, completed, failed,
+  // terminated). Intermediate lifecycle, suspend/resume, adjudications, and
+  // scans are distilled out.
+  SPARKLINE_EVENT_KIND_CONTROL = 8;
+  SPARKLINE_EVENT_KIND_STATE = 9;
+}
+
+// Stored trajectory event category, projected from
+// sondera_types::TrajectoryEvent's Action/Observation/Control/State variants.
+enum TrajectoryEventCategory {
+  TRAJECTORY_EVENT_CATEGORY_UNSPECIFIED = 0;
+  TRAJECTORY_EVENT_CATEGORY_ACTION = 1;
+  TRAJECTORY_EVENT_CATEGORY_OBSERVATION = 2;
+  TRAJECTORY_EVENT_CATEGORY_CONTROL = 3;
+  TRAJECTORY_EVENT_CATEGORY_STATE = 4;
+}

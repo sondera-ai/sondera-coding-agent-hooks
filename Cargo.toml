@@ -1,16 +1,32 @@
 [workspace]
 resolver = "2"
 members = [
-    "apps/claude",
-    "apps/copilot",
-    "apps/cursor",
-    "apps/gemini",
     "crates/guardrails/ifc",
     "crates/guardrails/policy",
     "crates/guardrails/signature",
+    "crates/console",
     "crates/harness",
-    "crates/common",
     "crates/mcp",
+    "crates/policy/cedar",
+    "crates/provider",
+    "crates/settings",
+    "crates/storage",
+    "crates/trajectory",
+    "crates/tui",
+    "crates/types",
+    "crates/schema",
+    "crates/hooks/core",
+    "crates/hooks/antigravity",
+    "crates/hooks/claude",
+    "crates/hooks/codex",
+    "crates/hooks/copilot",
+    "crates/hooks/cursor",
+    "crates/hooks/gemini",
+    "crates/hooks/hermes",
+    "crates/hooks/opencode",
+    "crates/hooks/openhands",
+    "crates/hooks/vscode",
+    "apps/sondera",
 ]
 
 [workspace.package]
@@ -18,12 +34,111 @@ authors = ["Sondera Team"]
 repository = "https://github.com/sondera-ai/sondera-coding-agent-hooks"
 
 [workspace.dependencies]
-sondera-harness = { path = "crates/harness" }
-sondera-hooks-common = { path = "crates/common" }
+# --- workspace crates ---
+sondera-harness = { path = "crates/harness", default-features = false }
 sondera-mcp = { path = "crates/mcp" }
+sondera-cedar-policy = { path = "crates/policy/cedar" }
+# Turso-backed local store, shared by the harness (event writes) and the console
+# gRPC service (agent/trajectory reads). The console does not need the Cedar
+# entity store, so it takes this with `default-features = false`.
+sondera-storage = { path = "crates/storage" }
+sondera-console = { path = "crates/console" }
 sondera-signature = { path = "crates/guardrails/signature" }
 sondera-policy = { path = "crates/guardrails/policy" }
 sondera-information-flow-control = { path = "crates/guardrails/ifc" }
+sondera-provider = { path = "crates/provider" }
+# The `.sondera` configuration directory: settings merge plus policy-asset
+# resolution. Lifted out of the Cedar crate so the trajectory scanner and the
+# CLI can read the same file without linking the policy engine.
+sondera-settings = { path = "crates/settings" }
+# LLM trajectory log analysis (AISI scanners). Depends on the provider backbone
+# and the domain scan types, never on the harness — the harness drives it.
+sondera-trajectory = { path = "crates/trajectory" }
+sondera-hooks = { path = "crates/hooks/core" }
+# Per-provider hook adapters. Library crates with no standalone binaries, so
+# `apps/sondera` is their only consumer — declared here anyway to keep every
+# workspace crate resolved from one place, the way a new adapter is expected to
+# be added.
+sondera-antigravity = { path = "crates/hooks/antigravity" }
+sondera-claude = { path = "crates/hooks/claude" }
+sondera-codex = { path = "crates/hooks/codex" }
+sondera-copilot = { path = "crates/hooks/copilot" }
+sondera-cursor = { path = "crates/hooks/cursor" }
+sondera-gemini = { path = "crates/hooks/gemini" }
+sondera-hermes = { path = "crates/hooks/hermes" }
+sondera-opencode = { path = "crates/hooks/opencode" }
+sondera-openhands = { path = "crates/hooks/openhands" }
+sondera-vscode = { path = "crates/hooks/vscode" }
+sondera-types = { path = "crates/types" }
+sondera-schema = { path = "crates/schema" }
+sondera-tui = { path = "crates/tui" }
+
+# The harness client the hooks consume. It is the `sondera-harness` crate built
+# with ONLY its lightweight `client` feature (no Cedar/Turso/Ollama engine), so
+# `use sondera_harness_client::...` in the hooks resolves to the gRPC client and
+# the re-exported `sondera_types` domain surface.
+sondera-harness-client = { package = "sondera-harness", path = "crates/harness", default-features = false, features = ["client"] }
+
+# --- external crates referenced via `{ workspace = true }` by crates/hooks/* ---
+clap = { version = "4.5", features = ["derive", "env"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_norway = "0.9"
+thiserror = "2.0"
+dunce = "1.0"
+tracing = "0.1"
+tokio = { version = "1.40", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+dirs = "5.0"
+chrono = "0.4"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
+tempfile = "3"
+temp-env = "0.3"
+proptest = "1"
+# Proto / gRPC deps for crates/types (sondera-schema). tonic 0.14 split out the
+# tonic-prost / tonic-prost-build crates, so keep the tonic* versions aligned.
+prost = "0.14"
+prost-types = "0.14"
+tonic = "0.14"
+tonic-prost = "0.14"
+tonic-prost-build = "0.14"
+protoc-bin-vendored = "3"
+# Domain-type deps for crates/types (sondera-types).
+async-trait = "0.1"
+futures-core = "0.3"
+schemars = { version = "1.2", features = ["preserve_order"] }
+strum_macros = "0.27"
+toml = "0.8"
+cedar-policy = "4"
+rstest = "0.26"
+
+# --- terminal UI (crates/tui) ---
+# Ratatui 0.30 and the crossterm major it compiles against by default. Pinning
+# both here keeps a single crossterm in the graph: two semver-incompatible
+# majors silently drop key events and leave raw mode on at exit.
+ratatui = "0.30"
+crossterm = { version = "0.29", features = ["event-stream"] }
+color-eyre = "0.6"
+futures = "0.3"
+insta = "1"
+
+# Doc links rot silently: rustdoc's link lints only warn by default, so a
+# renamed item leaves a dead `[`Type`]` behind that nothing fails on. Denying
+# them workspace-wide means `cargo doc` catches it the way clippy catches code.
+# Inherit in a crate with `[lints] workspace = true`.
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"
+private_intra_doc_links = "deny"
+invalid_html_tags = "deny"
+bare_urls = "deny"
+
+# Debug info for dependencies is the single biggest contributor to `target/`
+# size here: a full-debuginfo dep rlib runs to tens of megabytes, and nothing
+# ever collects the superseded copies. Workspace crates keep their debuginfo;
+# only dependency frames lose line numbers in a backtrace.
+[profile.dev.package."*"]
+debug = false
 
 [profile.release]
 lto = true
@@ -33,4 +148,4 @@ inherits = "release"
 lto = false           # Disable link-time optimization for faster CI builds
 opt-level = 1         # Basic optimization (not full O3)
 incremental = true    # Enable incremental compilation
-codegen-units = 16    # Parallel codegen for sondera-rs runner
+codegen-units = 16    # Parallel code generation for the CLI

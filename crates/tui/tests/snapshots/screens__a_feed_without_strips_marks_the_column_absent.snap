@@ -1,0 +1,18 @@
+---
+source: crates/tui/tests/screens.rs
+expression: "render(&mut app, 110, 14)"
+---
+"▀▀▀▀ SONDERA  trajectories                                                                   console  ● READY "
+"▀▀▀▀ filter all runs   3 of 3                                                                                 "
+"┌RUNS · 3────────────────────────────────────────────────────────────────────────────────────────────────────┐"
+"│ VERDICT     AGENT              ACTIVITY       RISK         STATUS     DUR     SUMMARY                      │"
+"│  ● ALLOW    claude-code        —               ◆ INFO      completed  4.2s    refactored the storage layer │"
+"│  ■ DENY     cursor             —               ■ HIGH      completed  4.2s    attempted a recursive delete │"
+"│  · NONE     codex              —              —            running    4.2s    ~ wiring the OTel spans      │"
+"│                                                                                                            │"
+"│                                                                                                            │"
+"│                                                                                                            │"
+"└────────────────────────────────────────────────────────────────────────────────────────────────────────────┘"
+"┌KEYS────────────────────────────────────────────────────────────────────────────────────────────────────────┐"
+"│ <↑↓/jk> move   <enter> open   <i> inspect   </> filter   <r> refresh   <t> theme   <q> quit                │"
+"└────────────────────────────────────────────────────────────────────────────────────────────────────────────┘"

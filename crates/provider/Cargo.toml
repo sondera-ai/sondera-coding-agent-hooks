@@ -1,0 +1,33 @@
+[package]
+name = "sondera-provider"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Runtime-configurable LLM provider backbone for Sondera applications"
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+rig = { package = "rig-core", version = "0.41" }
+# The agent/extractor builders left rig-core for this crate in 0.36+; both
+# are part of the shared provider surface exposed to downstream applications.
+rig-agent = "0.41"
+# Vertex AI is not one of rig-core's built-in providers: it authenticates with
+# Google Application Default Credentials rather than a bearer key, so it ships
+# as a separate crate. Its version tracks rig-core's exactly.
+rig-vertexai = "0.41"
+async-trait = "0.1"
+thiserror = { workspace = true }
+# Not optional: rig's `CompletionModel::StreamingResponse` is bound by
+# `Serialize + DeserializeOwned`, so `DynamicCompletionModel` cannot name its
+# associated type without serde. The `Provider` derives that used to sit behind
+# a `serde` feature are unconditional for the same reason.
+serde = { workspace = true }
+
+[dev-dependencies]
+# The Vertex AI integration test builds a client, which resolves Application
+# Default Credentials and therefore needs a reactor.
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

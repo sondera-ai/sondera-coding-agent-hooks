@@ -1,0 +1,38 @@
+[package]
+name = "sondera-cedar-policy"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Cedar policy engine and request context transformation for Sondera"
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+name = "sondera_cedar_policy"
+
+[dependencies]
+anyhow = "1.0"
+cedar-policy = { workspace = true }
+serde = { workspace = true }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util"] }
+toml = { workspace = true }
+tracing = { workspace = true }
+tree-sitter = "0.25"
+tree-sitter-bash = "0.25"
+url = "2"
+sondera-information-flow-control = { workspace = true }
+sondera-policy = { workspace = true }
+sondera-provider = { workspace = true }
+sondera-settings = { workspace = true }
+sondera-signature = { workspace = true }
+sondera-storage = { workspace = true }
+sondera-types = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+uuid = { version = "1.0", features = ["v4"] }
+
+[lints]
+workspace = true

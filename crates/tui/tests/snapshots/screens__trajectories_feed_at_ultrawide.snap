@@ -1,0 +1,20 @@
+---
+source: crates/tui/tests/screens.rs
+expression: "render(&mut app, 170, 16)"
+---
+"▀▀▀▀ SONDERA  trajectories                                                                                                                               console  ● READY "
+"▀▀▀▀ filter all runs   3 of 3                                                                                                                                             "
+"┌RUNS · 3────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐"
+"│ VERDICT     AGENT              PROVIDER    PLATFORM     ACTIVITY             RISK         OUTCOME     STATUS     EVENTS  DUR     UPDATED   SUMMARY                     │"
+"│  ● ALLOW    claude-code        anthropic   claude-code  ◉»✻✻⚙⚙⚙⚙⚙¶¶¶¶¶¶¶✻««◉  ◆ INFO      success     completed  42      4.2s    12:34:56  refactored the storage laye │"
+"│  ■ DENY     cursor             cursor      cursor       ◉»✻⇄⇄⇄⇄⇄⚙⚙⚙$$■$$$$✻◉  ■ HIGH      interrupted completed  42      4.2s    12:34:56  attempted a recursive delet │"
+"│  · NONE     codex              —           —            —                    —            —           running    42      4.2s    12:34:56  ~ wiring the OTel spans     │"
+"│                                                                                                                                                                        │"
+"│                                                                                                                                                                        │"
+"│                                                                                                                                                                        │"
+"│                                                                                                                                                                        │"
+"│                                                                                                                                                                        │"
+"└────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘"
+"┌KEYS────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐"
+"│ <↑↓/jk> move   <enter> open   <i> inspect   </> filter   <r> refresh   <t> theme   <q> quit                                                                            │"
+"└────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘"

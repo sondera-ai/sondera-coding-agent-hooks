@@ -12,3 +12,6 @@ yara-x = "1"
 include_dir = "0.7"
 tracing = "0.1"
 serde = { version = "1", features = ["derive"] }
+
+[lints]
+workspace = true

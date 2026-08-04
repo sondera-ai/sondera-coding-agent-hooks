@@ -1,0 +1,440 @@
+// Cedar schema for Sondera coding agent governance.
+//
+// Models the hook lifecycle events for policy-based authorization
+// and governance of AI coding agent actions. Applies to all
+// supported agents (Claude Code, Cursor, Copilot, etc.).
+//
+// Context fields are populated by the harness transform layer in
+// `crates/policy/cedar/src/transform.rs`, which scans content with YARA
+// signatures and classifies data sensitivity before building the Cedar request.
+//
+// All declarations live under the `Sondera` namespace, so types are
+// `Sondera::Agent`, `Sondera::Tool`, … and actions are
+// `Sondera::Action::"PreToolUse"`, etc. References WITHIN this block stay
+// unqualified (Cedar resolves them relative to the enclosing namespace);
+// policy files and the engine refer to them fully qualified.
+namespace Sondera {
+
+// ─────────────────────────────────────────────────────
+// Entity types
+// ─────────────────────────────────────────────────────
+
+// Principal: the AI coding agent executing actions.
+// provider identifies the agent platform (e.g. "claude", "cursor").
+entity Agent = {
+    provider: String,
+};
+
+// Principal: the human user interacting with the agent.
+entity User;
+
+// Principal: the agent harness/runtime acting on its own behalf for lifecycle
+// observations. Attribute-less identity principal, like User.
+entity System;
+
+// Principal: the policy engine itself re-adjudicating an event.
+entity Policy;
+
+// Information Flow Control label for data sensitivity classification.
+// Assigned by the data model classifier (e.g. Label::"HighlyConfidential").
+// The harness propagates the max label seen to the Trajectory entity.
+// Declared with a Label parent so policies can write `resource.label in
+// Label::"Confidential"` to mean "Confidential or more sensitive"; the parent
+// chain is supplied by the harness (see `entity::label_entities`). Equality
+// (`==`) usages are unaffected.
+entity Label in [Label];
+
+// Lowercased message roles emitted by the harness.
+entity Role enum ["user", "system", "assistant"];
+
+// A single message in the agent conversation. Created as a child
+// of Trajectory when a Prompt observation is processed. Content
+// and role are extracted from the prompt event.
+entity Message in [Trajectory] = {
+    content: String,
+    role: Role,
+};
+
+// The agent's execution trajectory — a sequence of actions and
+// observations within a session. Tracks the running maximum sensitivity
+// label. Used as the resource for
+// ShellCommand, ShellCommandOutput, WebFetch, WebFetchOutput,
+// and FileOperationResult actions.
+entity Trajectory = {
+    step_count: Long,
+    label: Label,
+};
+
+// A tool being invoked by the agent (e.g. Glob, Grep, Agent, MCP tools).
+// Used as the resource for PreToolUse actions. Child of Trajectory to
+// match the hierarchical pattern used by Message. Tools that map to
+// specific observation types (Shell, File, WebFetch) use their own
+// actions instead.
+entity Tool in [Trajectory];
+
+// A file being read, written, edited, or deleted by the agent.
+// The label tracks the data sensitivity classification of the
+// file's content, set when file operations are processed.
+// Used as the resource for FileRead, FileWrite, FileEdit, and
+// FileDelete actions. When a file is accessed, its sensitivity label propagates to
+// the trajectory's max label.
+entity File = {
+    label: Label,
+};
+
+// ─────────────────────────────────────────────────────
+// Shared Context Types
+// ─────────────────────────────────────────────────────
+
+// Policy-model classification emitted by the harness. Present on PreToolUse,
+// ShellCommand, ShellCommandOutput, WebFetch, WebFetchOutput,
+// FileRead/Write/Edit/Delete, FileOperationResult, and ToolOutput actions (not
+// on Prompt).
+//
+// Populated only when `[guardrails] enabled = true` in `sondera.toml` — the
+// classifier is an optional model call. Disabled, unreachable, or slower than
+// the adjudication budget, it fails open to `{ compliant: true, violations: [] }`
+// rather than inventing a violation, so a condition resting on these fields
+// alone stops covering anything when the provider does. Pair it with a
+// deterministic condition.
+type PolicyContext = {
+    // True if content is compliant with every configured policy template.
+    compliant: Bool,
+    // Set of violated category *codes*, e.g. "SC2" — not the category names.
+    // The closed set is declared in `policies.toml`; get it from the MCP
+    // server's `get_cedar_policy_context_features` rather than recalling it.
+    // Each template's `0` code ("SC0") is its *compliant* verdict, so it is a
+    // declared code that never usefully appears here.
+    violations: Set<String>,
+};
+
+// Result of scanning content against YARA signature rules.
+// Populated by sondera_signature::scan() in the harness.
+// Present on all actions that carry content.
+type SignatureContext = {
+    // Number of YARA signatures that matched.
+    matches: Long,
+    // Set of threat categories from matched rules
+    // (e.g. "prompt_injection", "credential_access", "exfiltration").
+    categories: Set<String>,
+    // Highest severity level: 0=None, 1=Low, 2=Medium, 3=High, 4=Critical.
+    severity: Long,
+};
+
+// Workspace context available on normalized events. `cwd` is populated for
+// ShellCommand actions from their typed `working_dir`; other events use "".
+type WorkspaceContext = {
+    cwd: String,
+};
+
+// ─────────────────────────────────────────────────────
+// Actions
+// ─────────────────────────────────────────────────────
+
+// Prompt: user or system prompt submission.
+// The harness scans prompt content for YARA signatures, classifies
+// sensitivity via the data model, creates a Message entity as a
+// child of the Trajectory, and raises the trajectory label to the
+// max sensitivity seen so far.
+// Resource is the Message entity (not Trajectory).
+type PromptContext = {
+    workspace: WorkspaceContext,
+    signature: SignatureContext,
+    label: Label,
+};
+
+action "Prompt" appliesTo {
+    principal: [Agent, User, System, Policy],
+    resource: [Message],
+    context: PromptContext,
+};
+
+// PreToolUse: agent requests a generic tool invocation (pre-execution).
+// Fires for tools that do not map to a specific action type (i.e. not
+// Shell, File, or WebFetch). The harness scans the tool name and
+// serialized arguments with YARA and classifies sensitivity with IFC. A Cedar
+// forbid here prevents the tool from being invoked.
+// Resource is the Tool entity (e.g. Tool::"Grep").
+type PreToolUseContext = {
+    workspace: WorkspaceContext,
+    signature: SignatureContext,
+    policy: PolicyContext,
+    label: Label,
+    // Name of the tool being invoked (e.g. "Grep", "Agent", "mcp__server__tool").
+    tool: String,
+    // Tool call arguments serialized as a JSON string.
+    arguments: String,
+};
+
+action "PreToolUse" appliesTo {
+    principal: [Agent, User, System, Policy],
+    resource: [Tool],
+    context: PreToolUseContext,
+};
+
+// Structured, parser-derived view of a shell command, produced by the
+// engine using tree-sitter-bash. Cedar has no ordered lists and no
+// per-element predicates over sets, so positional structure is flattened
+// into string sets with a `program:token` encoding (program lowercased,
+// token after shell quote removal). The `:` delimiter is safe under exact-match
+// `contains()` semantics: a crafted token containing `:` cannot collide
+// with another program's entry because the full string must match.
+// Designed for robust matching that survives case variants (RM/rm),
+// absolute paths (/bin/rm), bundled short flags (-rf == -r + -f), and
+// commands hidden in pipelines / && chains / $( ) / sudo-style wrappers.
+type ShellParseContext = {
+    // True iff the command parsed completely with no syntax errors.
+    // When false, `programs`/flags/args may be partial or empty. Policies
+    // should branch on `ok` and match `command` conservatively.
+    ok: Bool,
+    // Lowercased basename of every command-position word, across
+    // pipelines, `&&`/`;` chains, command substitutions, subshells, and
+    // peeled wrappers (sudo, env, timeout, xargs, ...).
+    // e.g. `sudo rm -rf /; echo done` -> {"sudo", "rm", "echo"}.
+    programs: Set<String>,
+    // Per-program flags as `"program:flag"`. Bundled alphabetic shorts
+    // are split (`-rf` -> `rm:-r`, `rm:-f`) AND the raw cluster is kept
+    // (`rm:-rf`) — a documented over-approximation; forbid-policies err
+    // toward blocking. Digit/path bodies (`-O2`, `-I/usr`) stay raw-only.
+    // Long flags keep their name (`git:--force`); `--opt=val` records
+    // `git:--opt`. Flags are otherwise unaliased; policies should OR long
+    // forms where needed.
+    program_flags: Set<String>,
+    // Case/separator-folded companion to `program_flags`. Values keep the
+    // `program:token` shape but lowercase the token and fold backslashes to `/`,
+    // e.g. `rm:-R` -> `rm:-r`. Windows slash-style options such as `/IM` are
+    // positional shell args and surface under `program_args_normalized`.
+    program_flags_normalized: Set<String>,
+    // Per-program literal positional arguments as `"program:arg"`
+    // (arg after shell quote removal). e.g. `rm:/`, `git:push`. Args after a `--`
+    // terminator are positional. Dynamic args ($VAR, $(...)) are omitted.
+    program_args: Set<String>,
+    // Case/separator-folded companion to `program_args`; useful when the target
+    // platform treats process names, package verbs, or path arguments
+    // case-insensitively.
+    program_args_normalized: Set<String>,
+    // Normalized path components extracted from positional args, scoped per
+    // program as `"program:component"`. This supports anchored credential-dir
+    // checks such as `cat:.aws` without matching `.awsome-config`.
+    program_arg_path_components_normalized: Set<String>,
+    // True iff an expansion/substitution appears in a command-NAME
+    // position (e.g. `$TOOL --flag`, `$(which rm) -rf`). Such commands
+    // get no program scoping — treat conservatively.
+    has_dynamic_command: Bool,
+    // True iff the command contains a command/process substitution.
+    has_command_substitution: Bool,
+    // True iff the command contains a pipeline (`|`).
+    has_pipeline: Bool,
+    // True iff the command contains any redirection (`>`, `>>`, `<`,
+    // heredoc, herestring).
+    has_redirection: Bool
+};
+
+// ShellCommand: agent requests shell command execution (pre-execution).
+// The harness scans the command string with YARA and classifies sensitivity
+// with IFC. A Cedar forbid here prevents the command from running.
+type ShellCommandContext = {
+    workspace: WorkspaceContext,
+    signature: SignatureContext,
+    // Signature scan of referenced file contents, kept separate so file content
+    // cannot trigger a command-signature denial. Always empty: a shell command
+    // names paths, and the harness does not read paths it inferred from a command
+    // string. File content reaches policy through explicit file-operation events,
+    // so gate it there — authoring validation reports conditions on this field
+    // as dead.
+    file_signature: SignatureContext,
+    policy: PolicyContext,
+    label: Label,
+    command: String,
+    working_dir: String,
+    // Structured tree-sitter-bash parse of `command`. `parse.ok == false` means
+    // the command could not be fully parsed and should be treated conservatively.
+    parse: ShellParseContext
+};
+
+action "ShellCommand" appliesTo {
+    principal: [Agent, User, System, Policy],
+    resource: [Trajectory],
+    context: ShellCommandContext,
+};
+
+// ShellCommandOutput: result of shell command execution (post-execution).
+// The harness scans combined stdout+stderr with YARA, classifies sensitivity
+// with IFC and raises the trajectory
+// label if output contains higher-sensitivity data.
+type ShellCommandOutputContext = {
+    workspace: WorkspaceContext,
+    signature: SignatureContext,
+    policy: PolicyContext,
+    label: Label,
+    // The command that was executed (empty string for output-only events).
+    command: String,
+    // Process exit code (-1 if interrupted).
+    exit_code: Long,
+    stdout: String,
+    stderr: String,
+    working_dir: String
+};
+
+action "ShellCommandOutput" appliesTo {
+    principal: [Agent, User, System, Policy],
+    resource: [Trajectory],
+    context: ShellCommandOutputContext,
+};
+
+// WebFetch: agent requests a URL fetch (pre-execution).
+// The harness scans the combined url+prompt with YARA, classifies sensitivity
+// with IFC. Fires before the fetch
+// — a Cedar forbid here prevents the request.
+// Structured, parser-derived view of a fetch URL, produced by the
+// harness from `url` via WHATWG URL parsing (the `url` crate). Lets
+// policies match the URL HOST directly instead of brittle `url like
+// "*…*"` globs over the raw string. Globbing is unsafe here: Cedar's
+// `like` wildcard `*` matches `/`, `@`, and `:`, so the host cannot be
+// isolated from path/userinfo/port — `https://trusted.example@evil.com`
+// would match a `*.example` allowlist while actually connecting to
+// evil.com. Parsing resolves that to host "evil.com".
+type UrlParseContext = {
+    // True iff `url` parsed as an absolute URL with a scheme. When false,
+    // the other fields are empty/zero — fall back to conservative matching
+    // on the raw `url`. CAVEAT: structured matches silently don't fire on
+    // unparseable or scheme-relative URLs; policies should branch on `ok`.
+    ok: Bool,
+    // Lowercased scheme without "://" (e.g. "https", "http", "ftp").
+    scheme: String,
+    // Lowercased host with userinfo, port, path, query, and fragment
+    // stripped. Empty when the URL has no host (`data:`/`mailto:`, or a
+    // relative URL). IPv6 hosts keep their brackets (e.g. "[::1]"). Note
+    // `ok == true` does not imply a non-empty host.
+    host: String,
+    // Effective port: the explicit port if present, else the known default
+    // for the scheme (https=443, http=80, …), else 0 for an unknown scheme
+    // or unparseable URL.
+    port: Long
+};
+
+type WebFetchContext = {
+    workspace: WorkspaceContext,
+    signature: SignatureContext,
+    policy: PolicyContext,
+    label: Label,
+    // The URL to be fetched.
+    url: String,
+    // The prompt describing what to extract from the page.
+    prompt: String,
+    // Structured parse of `url` (host/scheme/port). `url_parse.ok == false`
+    // means the URL could not be parsed and should be treated conservatively.
+    url_parse: UrlParseContext
+};
+
+action "WebFetch" appliesTo {
+    principal: [Agent, User, System, Policy],
+    resource: [Trajectory],
+    context: WebFetchContext,
+};
+
+// WebFetchOutput: result of a URL fetch (post-execution).
+// The harness scans the result content with YARA, classifies sensitivity with
+// IFC, and raises the trajectory label when the content is more sensitive.
+type WebFetchOutputContext = {
+    workspace: WorkspaceContext,
+    signature: SignatureContext,
+    policy: PolicyContext,
+    label: Label,
+    // The URL that was fetched.
+    url: String,
+    // HTTP status code of the response.
+    code: Long,
+    // The fetched and processed content.
+    result: String,
+};
+
+action "WebFetchOutput" appliesTo {
+    principal: [Agent, User, System, Policy],
+    resource: [Trajectory],
+    context: WebFetchOutputContext,
+};
+
+// FileRead/FileWrite/FileEdit/FileDelete: agent file operations (pre-execution).
+// The harness scans the path and content, classifies sensitivity, updates the
+// File entity, and raises the trajectory label when needed.
+// Resource is the File entity (e.g. File::"/path/to/file.txt").
+type FileOperationContext = {
+    workspace: WorkspaceContext,
+    signature: SignatureContext,
+    policy: PolicyContext,
+    label: Label,
+    // Absolute path to the file being operated on.
+    path: String,
+    // Lexical normalized companion: strips Windows verbatim/device prefixes,
+    // folds `\` to `/`, collapses repeated `/`, and lowercases. It does not
+    // canonicalize, resolve symlinks, expand variables, or erase `..`.
+    path_normalized: String,
+    // Operation type: "Read", "Write", "Edit", or "Delete".
+    operation: String,
+};
+
+action "FileRead" appliesTo {
+    principal: [Agent, User, System, Policy],
+    resource: [File],
+    context: FileOperationContext,
+};
+
+action "FileWrite" appliesTo {
+    principal: [Agent, User, System, Policy],
+    resource: [File],
+    context: FileOperationContext,
+};
+
+action "FileEdit" appliesTo {
+    principal: [Agent, User, System, Policy],
+    resource: [File],
+    context: FileOperationContext,
+};
+
+action "FileDelete" appliesTo {
+    principal: [Agent, User, System, Policy],
+    resource: [File],
+    context: FileOperationContext,
+};
+
+// FileOperationResult: result of a file operation (post-execution).
+// The harness scans and classifies the result content, then raises the trajectory
+// label when needed. The path is empty when the event does not provide one.
+type FileOperationResultContext = {
+    workspace: WorkspaceContext,
+    signature: SignatureContext,
+    policy: PolicyContext,
+    label: Label,
+    // Absolute path to the file that was operated on.
+    path: String,
+    // Lexical normalized companion to `path`.
+    path_normalized: String,
+    // File content returned (for reads) or empty string (for writes/edits/deletes).
+    content: String,
+};
+
+action "FileOperationResult" appliesTo {
+    principal: [Agent, User, System, Policy],
+    resource: [Trajectory],
+    context: FileOperationResultContext,
+};
+
+// ToolOutput: result of a generic tool invocation (post-execution).
+// Catches results that do not map to a specific observation type. The harness
+// scans and classifies output, then raises the trajectory label when needed.
+type ToolOutputContext = {
+    workspace: WorkspaceContext,
+    signature: SignatureContext,
+    policy: PolicyContext,
+    label: Label,
+    content: String,
+};
+
+action "ToolOutput" appliesTo {
+    principal: [Agent, User, System, Policy],
+    resource: [Trajectory],
+    context: ToolOutputContext,
+};
+
+} // namespace Sondera

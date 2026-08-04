@@ -1,21 +1,20 @@
 //! Policy model for evaluating content against customizable policy rules
 //! using [gpt-oss-safeguard](https://ollama.com/library/gpt-oss-safeguard).
 //!
-//! This crate uses the gpt-oss-safeguard reasoning model via Ollama to classify
-//! content against policy templates following the Harmony prompt format with
-//! multi-category severity tiers. The model returns a policy-referencing
-//! structured output: `{ "violation": 0|1, "policy_category": "<code>" }`.
+//! The evaluating LLM's provider is selected at runtime (see
+//! [`sondera_provider::Provider`]; the default is a local Ollama
+//! server). The gpt-oss-safeguard reasoning model classifies content against
+//! policy templates following the Harmony prompt format with multi-category
+//! severity tiers. Structured output is obtained with the provider client's
+//! extractor, which constrains the model to the [`PolicyModelResult`] schema:
+//! `{ "violation": 0|1, "policy_category": "<code>" }`.
 
 mod policy;
 
-use ollama_rs::{
-    Ollama,
-    generation::chat::{ChatMessage, MessageRole, request::ChatMessageRequest},
-    generation::parameters::{FormatType, JsonStructure},
-    models::ModelOptions,
-};
 use schemars::JsonSchema as JsonSchemaDerive;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
+use sondera_provider::{AgentClientExt, Client, ClientConfig};
 use std::path::Path;
 use std::time::Duration;
 use strum_macros::{Display, EnumString};
@@ -23,6 +22,7 @@ use thiserror::Error;
 use tracing::instrument;
 
 pub use policy::{PolicyClassification, PolicyTemplate, PolicyViolation};
+pub use sondera_provider::{Provider, Secret};
 
 // ---------------------------------------------------------------------------
 // Structured output from gpt-oss-safeguard
@@ -47,10 +47,10 @@ pub struct PolicyModelResult {
 /// Errors that can occur during policy evaluation.
 #[derive(Debug, Error)]
 pub enum PolicyError {
-    #[error("Ollama API error: {0}")]
-    OllamaError(String),
-    #[error("Failed to parse classification response: {0}")]
-    ParseError(#[from] serde_json::Error),
+    #[error("Failed to build model provider client: {0}")]
+    ClientBuild(#[from] sondera_provider::ProviderError),
+    #[error("Model inference error: {0}")]
+    Inference(String),
     #[error("Policy model not available: {0}")]
     ModelNotAvailable(String),
     #[error("No policy templates configured")]
@@ -126,28 +126,32 @@ impl ConversationMessage {
     }
 }
 
-impl From<ConversationRole> for MessageRole {
-    fn from(role: ConversationRole) -> Self {
-        match role {
-            ConversationRole::User => MessageRole::User,
-            ConversationRole::Assistant => MessageRole::Assistant,
-            ConversationRole::System => MessageRole::System,
-            ConversationRole::Tool => MessageRole::Tool,
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Model configuration
 // ---------------------------------------------------------------------------
 
 /// Configuration for the policy model.
+///
+/// The provider and endpoint are chosen at runtime; the defaults target a local
+/// Ollama server at `http://localhost:11434`.
 #[derive(Debug, Clone)]
 pub struct PolicyModelConfig {
-    /// Ollama host URL (default: http://localhost)
-    pub host: String,
-    /// Ollama port (default: 11434)
-    pub port: u16,
+    /// LLM provider to use (default: [`Provider::Ollama`]).
+    pub provider: Provider,
+    /// Provider API key. Ignored for providers that need none, such as Ollama.
+    pub api_key: Secret,
+    /// Base URL override for the provider endpoint (default: the local Ollama
+    /// server). `None` uses the provider's built-in default endpoint.
+    pub base_url: Option<String>,
+    /// Google Cloud project, used only by [`Provider::VertexAi`] — which is
+    /// addressed by project and location rather than by URL and key. Falls back
+    /// to `GOOGLE_CLOUD_PROJECT` when `None`; Vertex AI has no default project,
+    /// so with neither set the client fails to build.
+    pub project: Option<String>,
+    /// Google Cloud location, used only by [`Provider::VertexAi`] (e.g.
+    /// `us-central1`). Falls back to `GOOGLE_CLOUD_LOCATION` when `None`, then
+    /// to `global`.
+    pub location: Option<String>,
     /// Model name (default: gpt-oss-safeguard:20b)
     pub model: String,
     /// Temperature for model inference (default: 0.0 for deterministic output)
@@ -157,8 +161,11 @@ pub struct PolicyModelConfig {
 impl Default for PolicyModelConfig {
     fn default() -> Self {
         Self {
-            host: "http://localhost".to_string(),
-            port: 11434,
+            provider: Provider::Ollama,
+            api_key: Secret::default(),
+            base_url: Some("http://localhost:11434".to_string()),
+            project: None,
+            location: None,
             model: "gpt-oss-safeguard:20b".to_string(),
             temperature: 0.0,
         }
@@ -173,13 +180,30 @@ impl PolicyModelConfig {
         }
     }
 
-    pub fn host(mut self, host: impl Into<String>) -> Self {
-        self.host = host.into();
+    pub fn provider(mut self, provider: Provider) -> Self {
+        self.provider = provider;
         self
     }
 
-    pub fn port(mut self, port: u16) -> Self {
-        self.port = port;
+    pub fn api_key(mut self, api_key: impl Into<Secret>) -> Self {
+        self.api_key = api_key.into();
+        self
+    }
+
+    pub fn base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.base_url = Some(base_url.into());
+        self
+    }
+
+    /// Set the Google Cloud project ([`Provider::VertexAi`] only).
+    pub fn project(mut self, project: impl Into<String>) -> Self {
+        self.project = Some(project.into());
+        self
+    }
+
+    /// Set the Google Cloud location ([`Provider::VertexAi`] only).
+    pub fn location(mut self, location: impl Into<String>) -> Self {
+        self.location = Some(location.into());
         self
     }
 
@@ -213,7 +237,7 @@ impl PolicyModelConfig {
 ///     .example(r#"cursor.execute(f"SELECT * FROM users WHERE id = {id}")"#, true, "SC2")
 ///     .example(r#"cursor.execute("SELECT * FROM users WHERE id = %s", (id,))"#, false, "SC0");
 ///
-/// let model = PolicyModel::new(vec![policy]);
+/// let model = PolicyModel::new(vec![policy])?;
 /// let result = model.evaluate_content("os.system(f\"ping {host}\")").await?;
 ///
 /// if !result.compliant {
@@ -225,28 +249,48 @@ impl PolicyModelConfig {
 /// # }
 /// ```
 pub struct PolicyModel {
-    ollama: Ollama,
+    client: Client,
     config: PolicyModelConfig,
     policies: Vec<PolicyTemplate>,
 }
 
 impl PolicyModel {
-    pub fn new(policies: Vec<PolicyTemplate>) -> Self {
+    /// Build a model with the default (local Ollama) provider configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PolicyError::ClientBuild`] if the provider client cannot be
+    /// constructed from the configuration.
+    pub fn new(policies: Vec<PolicyTemplate>) -> Result<Self, PolicyError> {
         Self::with_config(policies, PolicyModelConfig::default())
     }
 
     pub fn from_toml(path: impl AsRef<Path>) -> Result<Self, PolicyError> {
         let policies = PolicyTemplate::load_from_toml(path)?;
-        Ok(Self::new(policies))
+        Self::new(policies)
     }
 
-    pub fn with_config(policies: Vec<PolicyTemplate>, config: PolicyModelConfig) -> Self {
-        let ollama = Ollama::new(config.host.clone(), config.port);
-        Self {
-            ollama,
+    /// Build a model with an explicit runtime provider configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PolicyError::ClientBuild`] if the provider client cannot be
+    /// constructed from `config`.
+    pub fn with_config(
+        policies: Vec<PolicyTemplate>,
+        config: PolicyModelConfig,
+    ) -> Result<Self, PolicyError> {
+        let client = config.provider.client(
+            &ClientConfig::new(config.api_key.expose())
+                .maybe_base_url(config.base_url.as_deref())
+                .maybe_project(config.project.as_deref())
+                .maybe_location(config.location.as_deref()),
+        )?;
+        Ok(Self {
+            client,
             config,
             policies,
-        }
+        })
     }
 
     /// Evaluate raw content against all configured policy templates.
@@ -325,10 +369,10 @@ impl PolicyModel {
         &self.config
     }
 
-    /// Health check to verify Ollama is responsive.
+    /// Health check to verify the provider is responsive.
     ///
-    /// Returns Ok(()) if Ollama responds within 5 seconds, Err otherwise.
-    /// Use this at startup to fail fast if Ollama is unavailable.
+    /// Returns Ok(()) if the provider responds within 5 seconds, Err otherwise.
+    /// Use this at startup to fail fast if the provider is unavailable.
     pub async fn health_check(&self) -> Result<(), PolicyError> {
         if let Some(policy) = self.policies.first() {
             self.evaluate_single(policy, "health check", Duration::from_secs(5))
@@ -350,26 +394,21 @@ impl PolicyModel {
         let system_prompt = policy.render();
         let user_prompt = policy.render_user_message(content);
 
-        let messages = vec![
-            ChatMessage::system(system_prompt),
-            ChatMessage::user(user_prompt),
-        ];
+        // The provider client's Extractor drives the model through a `submit`
+        // tool constrained by the `PolicyModelResult` JSON schema, returning the
+        // typed value directly. The Harmony system prompt becomes the extractor
+        // preamble and temperature is forwarded as a request parameter.
+        let extractor = self
+            .client
+            .extractor::<PolicyModelResult>(&self.config.model)
+            .preamble(&system_prompt)
+            .additional_params(json!({ "temperature": self.config.temperature }))
+            .build();
 
-        let format =
-            FormatType::StructuredJson(Box::new(JsonStructure::new::<PolicyModelResult>()));
-
-        let request = ChatMessageRequest::new(self.config.model.clone(), messages)
-            .format(format)
-            .options(ModelOptions::default().temperature(self.config.temperature));
-
-        let response = tokio::time::timeout(timeout, self.ollama.send_chat_messages(request))
+        tokio::time::timeout(timeout, extractor.extract(user_prompt))
             .await
             .map_err(|_| PolicyError::Timeout)?
-            .map_err(|e| PolicyError::OllamaError(e.to_string()))?;
-
-        let result: PolicyModelResult = serde_json::from_str(&response.message.content)?;
-
-        Ok(result)
+            .map_err(|e| PolicyError::Inference(e.to_string()))
     }
 
     fn format_conversation(history: &[ConversationMessage]) -> String {
@@ -401,13 +440,18 @@ impl PolicyModelBuilder {
         self
     }
 
-    pub fn host(mut self, host: impl Into<String>) -> Self {
-        self.config.host = host.into();
+    pub fn provider(mut self, provider: Provider) -> Self {
+        self.config.provider = provider;
         self
     }
 
-    pub fn port(mut self, port: u16) -> Self {
-        self.config.port = port;
+    pub fn api_key(mut self, api_key: impl Into<Secret>) -> Self {
+        self.config.api_key = api_key.into();
+        self
+    }
+
+    pub fn base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.config.base_url = Some(base_url.into());
         self
     }
 
@@ -421,7 +465,13 @@ impl PolicyModelBuilder {
         self
     }
 
-    pub fn build(self) -> PolicyModel {
+    /// Construct the [`PolicyModel`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PolicyError::ClientBuild`] if the provider client cannot be
+    /// constructed from the configured provider.
+    pub fn build(self) -> Result<PolicyModel, PolicyError> {
         PolicyModel::with_config(self.policies, self.config)
     }
 }
@@ -435,6 +485,7 @@ impl Default for PolicyModelBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     #[test]
     fn violations_by_category_case_insensitive() {
@@ -462,6 +513,33 @@ mod tests {
         assert_eq!(classification.violations_by_category("injection").len(), 2);
         let display = format!("{}", classification);
         assert!(display.contains("NON-COMPLIANT"));
+    }
+
+    /// Two findings under one code are one code, so a policy matching it does
+    /// not depend on how many times the classifier said it.
+    #[test]
+    fn codes_are_deduplicated() {
+        let classification = PolicyClassification {
+            compliant: false,
+            violations: vec![
+                PolicyViolation {
+                    category: "Injection".to_string(),
+                    rule: "SC2".to_string(),
+                    description: "V1".to_string(),
+                },
+                PolicyViolation {
+                    category: "injection".to_string(),
+                    rule: "SC2".to_string(),
+                    description: "V2".to_string(),
+                },
+            ],
+        };
+
+        assert_eq!(
+            classification.codes(),
+            BTreeSet::from(["SC2".to_string()]),
+            "codes must be the deduplicated `rule` values, not the category names"
+        );
     }
 
     #[test]
@@ -529,16 +607,22 @@ mod tests {
     #[test]
     fn policy_model_builder() {
         let model = PolicyModelBuilder::new()
-            .host("http://192.168.1.100")
-            .port(11435)
+            .provider(Provider::OpenAI)
+            .api_key("sk-test")
+            .base_url("https://proxy.internal/v1")
             .model("gpt-oss-safeguard:120b")
             .temperature(0.1)
             .policy(PolicyTemplate::new("P1", "A").category("A0", "Safe", "Safe."))
             .policy(PolicyTemplate::new("P2", "B").category("B0", "Safe", "Safe."))
-            .build();
+            .build()
+            .expect("client should build");
 
         assert_eq!(model.model(), "gpt-oss-safeguard:120b");
-        assert_eq!(model.config().host, "http://192.168.1.100");
+        assert_eq!(model.config().provider, Provider::OpenAI);
+        assert_eq!(
+            model.config().base_url.as_deref(),
+            Some("https://proxy.internal/v1")
+        );
         assert_eq!(model.policies().len(), 2);
     }
 
@@ -602,7 +686,7 @@ category = "SC0"
     fn load_baseline_toml() {
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../../policies/policies.toml"
+            "/../../../.sondera/policies.toml"
         );
         let policies = PolicyTemplate::load_from_toml(path).unwrap();
         let p = &policies[0];
@@ -624,7 +708,7 @@ category = "SC0"
     fn policy_model_from_toml() {
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../../policies/policies.toml"
+            "/../../../.sondera/policies.toml"
         );
         let model = PolicyModel::from_toml(path).unwrap();
         assert_eq!(model.policies().len(), 1);

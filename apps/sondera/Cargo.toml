@@ -1,0 +1,66 @@
+[package]
+name = "sondera"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors.workspace = true
+repository.workspace = true
+description = "Unified Sondera CLI: coding-agent hook adapters and the Sondera server"
+
+[[bin]]
+name = "sondera"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+clap = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# `serve` builds the server itself rather than letting each service build its
+# own, so the two gRPC services share one port.
+tonic = { workspace = true }
+
+# Shared hook infrastructure (tracing init, runtime error type).
+sondera-hooks = { workspace = true }
+# The generic gRPC harness service served by `serve`, plus the background
+# trajectory scanner it dispatches to when `[scanner]` is enabled.
+sondera-harness = { workspace = true, features = ["server", "scanner"] }
+# The Cedar policy engine behind that service.
+sondera-cedar-policy = { workspace = true }
+# The trajectory scanner `serve` constructs from `[scanner]` in sondera.toml.
+sondera-trajectory = { workspace = true }
+# The store shared by the Cedar engine and console service.
+sondera-storage = { workspace = true }
+# The console gRPC read surface served by `serve`.
+sondera-console = { workspace = true }
+# The Cedar policy MCP server behind the `mcp` command.
+sondera-mcp = { workspace = true }
+# The terminal reading view behind `tui`. It is a gRPC client of the console
+# rather than a second reader of the store, so it needs no database access here.
+sondera-tui = { workspace = true }
+
+# Per-provider hook CLIs exposed under the `hooks` command group.
+sondera-antigravity = { workspace = true }
+sondera-claude = { workspace = true }
+sondera-codex = { workspace = true }
+sondera-copilot = { workspace = true }
+sondera-cursor = { workspace = true }
+sondera-gemini = { workspace = true }
+sondera-hermes = { workspace = true }
+sondera-opencode = { workspace = true }
+sondera-openhands = { workspace = true }
+sondera-vscode = { workspace = true }
+
+[dev-dependencies]
+# `tests/serve_surfaces.rs` drives a real `sondera serve` process with the
+# generated gRPC clients for both services; `tests/mcp_stdio.rs` drives a real
+# `sondera mcp` process over its stdio pipes and needs neither.
+sondera-schema = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tonic = { workspace = true }
+
+[lints]
+workspace = true

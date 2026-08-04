@@ -215,6 +215,16 @@ mod tests {
     }
 
     #[test]
+    fn detects_mongodb_password() {
+        let ctx = scan("database password = mongodb-secret");
+        assert!(
+            ctx.matches
+                .iter()
+                .any(|matched| matched.identifier == "secrets_generic_database_credentials")
+        );
+    }
+
+    #[test]
     fn severity_ordering_and_aggregation() {
         // Derive-based ordering
         assert!(Severity::None < Severity::Low);

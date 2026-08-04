@@ -19,8 +19,9 @@ use strum_macros::{Display, EnumString};
 /// - **Confidential**: Sensitive business data requiring access control
 /// - **Highly Confidential**: Most sensitive data with strict access restrictions
 ///
-/// The enum serializes to snake_case (`"public"`, `"internal"`, `"confidential"`,
-/// `"highly_confidential"`) for use in structured model output and TOML configuration.
+/// The enum serializes to its variant names (`"Public"`, `"Internal"`,
+/// `"Confidential"`, `"HighlyConfidential"`) for use in structured model output
+/// and TOML configuration.
 ///
 /// See: <https://learn.microsoft.com/en-us/purview/sensitivity-labels>
 #[derive(
@@ -37,7 +38,6 @@ use strum_macros::{Display, EnumString};
     Display,
     Default,
 )]
-#[serde(rename_all = "snake_case")]
 pub enum Label {
     /// Public data - can be freely shared externally without restrictions.
     /// Examples: Marketing materials, public announcements, published content.
@@ -70,10 +70,10 @@ impl Label {
     /// The snake_case name used in serde serialization and model output.
     pub fn serde_name(&self) -> &'static str {
         match self {
-            Label::Public => "public",
-            Label::Internal => "internal",
-            Label::Confidential => "confidential",
-            Label::HighlyConfidential => "highly_confidential",
+            Label::Public => "Public",
+            Label::Internal => "Internal",
+            Label::Confidential => "Confidential",
+            Label::HighlyConfidential => "HighlyConfidential",
         }
     }
 
@@ -234,7 +234,7 @@ impl LabelTemplate {
                  If the content is sensitive, return:\n\
                  {\"sensitive\": 1, \"sensitivity_category\": \"<label>\"}\n\
                  If the content is public/non-sensitive, return:\n\
-                 {\"sensitive\": 0, \"sensitivity_category\": \"public\"}\n",
+                 {\"sensitive\": 0, \"sensitivity_category\": \"Public\"}\n",
             );
         } else {
             prompt.push_str(&self.instructions);
@@ -374,7 +374,7 @@ mod tests {
     #[test]
     fn label_serde_roundtrip() {
         let json = serde_json::to_string(&Label::HighlyConfidential).unwrap();
-        assert_eq!(json, r#""highly_confidential""#);
+        assert_eq!(json, r#""HighlyConfidential""#);
         let parsed: Label = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, Label::HighlyConfidential);
     }
@@ -406,8 +406,8 @@ mod tests {
         let prompt = label.render();
         assert!(prompt.contains("# DATA_SENSITIVITY"));
         assert!(prompt.contains("Sensitivity classification."));
-        assert!(prompt.contains("public (Public): Public data."));
-        assert!(prompt.contains(r#""sensitivity_category": "highly_confidential""#));
+        assert!(prompt.contains("Public (Public): Public data."));
+        assert!(prompt.contains(r#""sensitivity_category": "HighlyConfidential""#));
     }
 
     #[test]
@@ -415,7 +415,7 @@ mod tests {
         let label = LabelTemplate::new("TEST").category(Label::Public, "Public data.");
         let prompt = label.render();
         assert!(prompt.contains("## INSTRUCTIONS"));
-        assert!(prompt.contains(r#""sensitivity_category": "public""#));
+        assert!(prompt.contains(r#""sensitivity_category": "Public""#));
     }
 
     #[test]
@@ -429,7 +429,7 @@ mod tests {
 
     #[test]
     fn model_result_serde() {
-        let json = r#"{"sensitive": 1, "sensitivity_category": "highly_confidential"}"#;
+        let json = r#"{"sensitive": 1, "sensitivity_category": "HighlyConfidential"}"#;
         let result: SensitivityModelResult = serde_json::from_str(json).unwrap();
         assert_eq!(result.sensitive, 1);
         assert_eq!(result.sensitivity_category, Label::HighlyConfidential);
@@ -446,7 +446,7 @@ mod tests {
         let json = serde_json::to_string_pretty(&schema).unwrap();
         assert!(json.contains("sensitive"));
         assert!(json.contains("sensitivity_category"));
-        assert!(json.contains("highly_confidential"));
+        assert!(json.contains("HighlyConfidential"));
     }
 
     #[test]
@@ -457,22 +457,22 @@ name = "DATA_SENSITIVITY"
 description = "Data sensitivity classification."
 
 [[labels.categories]]
-label = "public"
+label = "Public"
 definition = "Public data."
 
 [[labels.categories]]
-label = "highly_confidential"
+label = "HighlyConfidential"
 definition = "Restricted data."
 
 [[labels.examples]]
 content = "Company press release"
 sensitive = false
-label = "public"
+label = "Public"
 
 [[labels.examples]]
 content = "SSN: 123-45-6789"
 sensitive = true
-label = "highly_confidential"
+label = "HighlyConfidential"
 "#;
         let labels = LabelTemplate::parse_toml(toml).unwrap();
         assert_eq!(labels.len(), 1);
@@ -485,7 +485,7 @@ label = "highly_confidential"
 
         let rendered = l.render();
         assert!(rendered.contains("# DATA_SENSITIVITY"));
-        assert!(rendered.contains("public (Public): Public data."));
+        assert!(rendered.contains("Public (Public): Public data."));
     }
 
     #[test]
@@ -499,7 +499,7 @@ label = "highly_confidential"
 
     #[test]
     fn load_baseline_toml() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../policies/ifc.toml");
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../.sondera/ifc.toml");
         let labels = LabelTemplate::load_from_toml(path).unwrap();
         assert_eq!(labels.len(), 1);
 

@@ -1,0 +1,38 @@
+[package]
+name = "sondera-storage"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Turso-backed local storage for Sondera trajectories, agents, and Cedar entities"
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+name = "sondera_storage"
+crate-type = ["rlib"]
+
+[features]
+# The Cedar entity store. Gated so the console gRPC service — which only reads
+# agents and trajectories — does not link `cedar-policy`.
+default = ["cedar"]
+cedar = ["dep:cedar-policy"]
+
+[dependencies]
+sondera-types = { workspace = true }
+anyhow = "1.0"
+chrono = { workspace = true, features = ["serde"] }
+dirs = { workspace = true }
+futures-core = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = ["preserve_order"] }
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+tracing = { workspace = true }
+turso = "0.8.0-pre.2"
+cedar-policy = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "time"] }
+
+[lints]
+workspace = true

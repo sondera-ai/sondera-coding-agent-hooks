@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package sondera.console.v1;
+
+import "google/protobuf/empty.proto";
+import "sondera/console/v1/agent.proto";
+import "sondera/console/v1/trajectory.proto";
+
+// Read-model / BFF for the Sondera coding-agent console, covering the agent and
+// trajectory collections.
+//
+// This service fronts one machine's local store: requests carry no scope beyond
+// the resource they name, and the store traits take none.
+service ConsoleService {
+  // Agents (agent.proto). Agent identity is registered by the harness when
+  // hooks first report in — the console does not create agents and never writes
+  // agent identity.
+
+  // Lists the store's agents.
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+  // Returns one agent detail by resource name.
+  rpc GetAgent(GetAgentRequest) returns (Agent);
+  // Updates an agent's console-mutable fields and returns the fresh projection.
+  // There are none today: every AgentSummary field is either a computed rollup,
+  // derived from the id (display_name), or harness-owned identity (provider,
+  // platform) — so this validates the request, fails NOT_FOUND for an unknown
+  // agent, and persists nothing. Fields become writable here only when the
+  // console owns their storage.
+  rpc UpdateAgent(UpdateAgentRequest) returns (AgentSummary);
+  // Computes agent stats; honors the ListAgents filter grammar.
+  rpc AnalyzeAgents(AnalyzeAgentsRequest) returns (AgentStats);
+  // Hard-deletes one agent by resource name. Unlike the read-mostly rest of the
+  // agent surface this is a genuine write: it removes the agent's identity row
+  // and its trajectory events. Idempotent callers should treat NOT_FOUND as
+  // already-deleted.
+  rpc DeleteAgent(DeleteAgentRequest) returns (google.protobuf.Empty);
+
+  // Trajectories (trajectory.proto). Trajectories and events are
+  // harness-written, console-read projections.
+
+  // Returns one trajectory summary by resource name, without events.
+  rpc GetTrajectory(GetTrajectoryRequest) returns (TrajectorySummary);
+  // Returns a paginated, ordered page of stored events for one trajectory,
+  // each folded together with the adjudication and scan it caused.
+  rpc ListTrajectoryEvents(ListTrajectoryEventsRequest) returns (ListTrajectoryEventsResponse);
+  // Lists trajectory summaries; supports agent/decision/status filters.
+  rpc ListTrajectories(ListTrajectoriesRequest) returns (ListTrajectoriesResponse);
+  // Returns precomputed strips for trajectory rows currently visible in the UI.
+  rpc BatchGetTrajectorySparklines(BatchGetTrajectorySparklinesRequest) returns (BatchGetTrajectorySparklinesResponse);
+  // Live feed of new/updated trajectory summaries.
+  rpc StreamTrajectories(StreamTrajectoriesRequest) returns (stream TrajectorySummary);
+  // Emits a trajectory's stored backlog then tails newly inserted events.
+  rpc StreamTrajectory(StreamTrajectoryRequest) returns (stream TrajectoryEvent);
+}

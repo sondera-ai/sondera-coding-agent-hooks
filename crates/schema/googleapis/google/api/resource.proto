@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package google.api;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "google.golang.org/genproto/googleapis/api/annotations;annotations";
+option java_multiple_files = true;
+option java_outer_classname = "ResourceProto";
+option java_package = "com.google.api";
+
+message ResourceDescriptor {
+  string type = 1;
+  repeated string pattern = 2;
+  string name_field = 3;
+  string history = 4;
+  string plural = 5;
+  string singular = 6;
+  repeated Style style = 10;
+
+  enum Style {
+    STYLE_UNSPECIFIED = 0;
+    DECLARATIVE_FRIENDLY = 1;
+  }
+}
+
+message ResourceReference {
+  string type = 1;
+  string child_type = 2;
+}
+
+extend google.protobuf.MessageOptions {
+  ResourceDescriptor resource = 1053;
+}
+
+extend google.protobuf.FieldOptions {
+  ResourceReference resource_reference = 1055;
+}

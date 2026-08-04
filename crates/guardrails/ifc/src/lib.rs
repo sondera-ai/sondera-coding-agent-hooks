@@ -1,12 +1,16 @@
 //! Data classification model for categorizing content sensitivity levels.
 //!
-//! This module provides data classification capabilities using local LLMs via Ollama.
-//! It classifies content into sensitivity levels aligned with Microsoft Purview
-//! sensitivity labels: Public, General, Confidential, and Highly Confidential.
+//! This module provides data classification capabilities backed by an LLM whose
+//! provider is selected at runtime (see [`sondera_provider::Provider`];
+//! the default is a local Ollama server). It classifies content into sensitivity
+//! levels aligned with Microsoft Purview sensitivity labels: Public, General,
+//! Confidential, and Highly Confidential.
 //!
-//! The crate uses the gpt-oss-safeguard reasoning model via Ollama to classify
-//! content against sensitivity label templates following the Harmony prompt format
-//! with multi-category sensitivity tiers.
+//! The crate uses the gpt-oss-safeguard reasoning model to classify content
+//! against sensitivity label templates following the Harmony prompt format with
+//! multi-category sensitivity tiers. Structured output is obtained with the
+//! provider client's extractor, which constrains the model to the
+//! [`SensitivityModelResult`] schema.
 //!
 //! The model returns structured output with `sensitivity_category` as a [`Label`]
 //! enum value (`public`, `internal`, `confidential`, `highly_confidential`),
@@ -16,12 +20,8 @@
 
 mod label;
 
-use ollama_rs::{
-    Ollama,
-    generation::chat::{ChatMessage, request::ChatMessageRequest},
-    generation::parameters::{FormatType, JsonStructure},
-    models::ModelOptions,
-};
+use serde_json::json;
+use sondera_provider::{AgentClientExt, Client, ClientConfig};
 use std::path::Path;
 use std::time::Duration;
 use thiserror::Error;
@@ -31,6 +31,7 @@ pub use label::{
     Label, LabelCategory, LabelExample, LabelTemplate, SensitivityClassification,
     SensitivityFinding, SensitivityModelResult,
 };
+pub use sondera_provider::{Provider, Secret};
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -39,10 +40,10 @@ pub use label::{
 /// Errors that can occur during data classification.
 #[derive(Debug, Error)]
 pub enum DataClassificationError {
-    #[error("Ollama API error: {0}")]
-    OllamaError(String),
-    #[error("Failed to parse classification response: {0}")]
-    ParseError(#[from] serde_json::Error),
+    #[error("Failed to build model provider client: {0}")]
+    ClientBuild(#[from] sondera_provider::ProviderError),
+    #[error("Model inference error: {0}")]
+    Inference(String),
     #[error("No label templates configured")]
     NoLabels,
     #[error("Failed to read label file: {0}")]
@@ -56,12 +57,27 @@ pub enum DataClassificationError {
 // ---------------------------------------------------------------------------
 
 /// Configuration for the data classification model.
+///
+/// The provider and endpoint are chosen at runtime; the defaults target a local
+/// Ollama server at `http://localhost:11434`.
 #[derive(Debug, Clone)]
 pub struct DataModelConfig {
-    /// Ollama host URL (default: http://localhost)
-    pub host: String,
-    /// Ollama port (default: 11434)
-    pub port: u16,
+    /// LLM provider to use (default: [`Provider::Ollama`]).
+    pub provider: Provider,
+    /// Provider API key. Ignored for providers that need none, such as Ollama.
+    pub api_key: Secret,
+    /// Base URL override for the provider endpoint (default: the local Ollama
+    /// server). `None` uses the provider's built-in default endpoint.
+    pub base_url: Option<String>,
+    /// Google Cloud project, used only by [`Provider::VertexAi`] — which is
+    /// addressed by project and location rather than by URL and key. Falls back
+    /// to `GOOGLE_CLOUD_PROJECT` when `None`; Vertex AI has no default project,
+    /// so with neither set the client fails to build.
+    pub project: Option<String>,
+    /// Google Cloud location, used only by [`Provider::VertexAi`] (e.g.
+    /// `us-central1`). Falls back to `GOOGLE_CLOUD_LOCATION` when `None`, then
+    /// to `global`.
+    pub location: Option<String>,
     /// Model name (default: gpt-oss-safeguard:20b)
     pub model: String,
     /// Temperature for model inference (default: 0.0 for deterministic output)
@@ -71,8 +87,11 @@ pub struct DataModelConfig {
 impl Default for DataModelConfig {
     fn default() -> Self {
         Self {
-            host: "http://localhost".to_string(),
-            port: 11434,
+            provider: Provider::Ollama,
+            api_key: Secret::default(),
+            base_url: Some("http://localhost:11434".to_string()),
+            project: None,
+            location: None,
             model: "gpt-oss-safeguard:20b".to_string(),
             temperature: 0.0,
         }
@@ -87,13 +106,30 @@ impl DataModelConfig {
         }
     }
 
-    pub fn host(mut self, host: impl Into<String>) -> Self {
-        self.host = host.into();
+    pub fn provider(mut self, provider: Provider) -> Self {
+        self.provider = provider;
         self
     }
 
-    pub fn port(mut self, port: u16) -> Self {
-        self.port = port;
+    pub fn api_key(mut self, api_key: impl Into<Secret>) -> Self {
+        self.api_key = api_key.into();
+        self
+    }
+
+    pub fn base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.base_url = Some(base_url.into());
+        self
+    }
+
+    /// Set the Google Cloud project ([`Provider::VertexAi`] only).
+    pub fn project(mut self, project: impl Into<String>) -> Self {
+        self.project = Some(project.into());
+        self
+    }
+
+    /// Set the Google Cloud location ([`Provider::VertexAi`] only).
+    pub fn location(mut self, location: impl Into<String>) -> Self {
+        self.location = Some(location.into());
         self
     }
 
@@ -127,7 +163,7 @@ impl DataModelConfig {
 ///     .example("Our company was founded in 2010.", false, Label::Public)
 ///     .example("Employee SSN: 123-45-6789", true, Label::HighlyConfidential);
 ///
-/// let model = DataModel::new(vec![label]);
+/// let model = DataModel::new(vec![label])?;
 /// let result = model.classify("Employee SSN: 123-45-6789").await?;
 ///
 /// if result.is_sensitive() {
@@ -139,28 +175,48 @@ impl DataModelConfig {
 /// # }
 /// ```
 pub struct DataModel {
-    ollama: Ollama,
+    client: Client,
     config: DataModelConfig,
     labels: Vec<LabelTemplate>,
 }
 
 impl DataModel {
-    pub fn new(labels: Vec<LabelTemplate>) -> Self {
+    /// Build a model with the default (local Ollama) provider configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataClassificationError::ClientBuild`] if the provider client
+    /// cannot be constructed from the configuration.
+    pub fn new(labels: Vec<LabelTemplate>) -> Result<Self, DataClassificationError> {
         Self::with_config(labels, DataModelConfig::default())
     }
 
     pub fn from_toml(path: impl AsRef<Path>) -> Result<Self, DataClassificationError> {
         let labels = LabelTemplate::load_from_toml(path)?;
-        Ok(Self::new(labels))
+        Self::new(labels)
     }
 
-    pub fn with_config(labels: Vec<LabelTemplate>, config: DataModelConfig) -> Self {
-        let ollama = Ollama::new(config.host.clone(), config.port);
-        Self {
-            ollama,
+    /// Build a model with an explicit runtime provider configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataClassificationError::ClientBuild`] if the provider client
+    /// cannot be constructed from `config`.
+    pub fn with_config(
+        labels: Vec<LabelTemplate>,
+        config: DataModelConfig,
+    ) -> Result<Self, DataClassificationError> {
+        let client = config.provider.client(
+            &ClientConfig::new(config.api_key.expose())
+                .maybe_base_url(config.base_url.as_deref())
+                .maybe_project(config.project.as_deref())
+                .maybe_location(config.location.as_deref()),
+        )?;
+        Ok(Self {
+            client,
             config,
             labels,
-        }
+        })
     }
 
     /// Classify content against all configured label templates.
@@ -217,10 +273,10 @@ impl DataModel {
         &self.config
     }
 
-    /// Health check to verify Ollama is responsive.
+    /// Health check to verify the provider is responsive.
     ///
-    /// Returns Ok(()) if Ollama responds within 5 seconds, Err otherwise.
-    /// Use this at startup to fail fast if Ollama is unavailable.
+    /// Returns Ok(()) if the provider responds within 5 seconds, Err otherwise.
+    /// Use this at startup to fail fast if the provider is unavailable.
     pub async fn health_check(&self) -> Result<(), DataClassificationError> {
         if let Some(label) = self.labels.first() {
             self.classify_single(label, "health check", Duration::from_secs(5))
@@ -242,31 +298,26 @@ impl DataModel {
         let system_prompt = label.render();
         let user_prompt = label.render_user_message(content);
 
-        let messages = vec![
-            ChatMessage::system(system_prompt),
-            ChatMessage::user(user_prompt),
-        ];
+        // The provider client's Extractor drives the model through a `submit`
+        // tool constrained by the `SensitivityModelResult` JSON schema, returning
+        // the typed value directly. The Harmony system prompt becomes the
+        // extractor preamble and temperature is forwarded as a request parameter.
+        let extractor = self
+            .client
+            .extractor::<SensitivityModelResult>(&self.config.model)
+            .preamble(&system_prompt)
+            .additional_params(json!({ "temperature": self.config.temperature }))
+            .build();
 
-        let format =
-            FormatType::StructuredJson(Box::new(JsonStructure::new::<SensitivityModelResult>()));
-
-        let request = ChatMessageRequest::new(self.config.model.clone(), messages)
-            .format(format)
-            .options(ModelOptions::default().temperature(self.config.temperature));
-
-        let response = tokio::time::timeout(timeout, self.ollama.send_chat_messages(request))
+        tokio::time::timeout(timeout, extractor.extract(user_prompt))
             .await
             .map_err(|_| {
-                DataClassificationError::OllamaError(format!(
+                DataClassificationError::Inference(format!(
                     "Classification timeout after {}s",
                     timeout.as_secs()
                 ))
             })?
-            .map_err(|e| DataClassificationError::OllamaError(e.to_string()))?;
-
-        let result: SensitivityModelResult = serde_json::from_str(&response.message.content)?;
-
-        Ok(result)
+            .map_err(|e| DataClassificationError::Inference(e.to_string()))
     }
 }
 
@@ -290,13 +341,18 @@ impl DataModelBuilder {
         self
     }
 
-    pub fn host(mut self, host: impl Into<String>) -> Self {
-        self.config.host = host.into();
+    pub fn provider(mut self, provider: Provider) -> Self {
+        self.config.provider = provider;
         self
     }
 
-    pub fn port(mut self, port: u16) -> Self {
-        self.config.port = port;
+    pub fn api_key(mut self, api_key: impl Into<Secret>) -> Self {
+        self.config.api_key = api_key.into();
+        self
+    }
+
+    pub fn base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.config.base_url = Some(base_url.into());
         self
     }
 
@@ -310,7 +366,13 @@ impl DataModelBuilder {
         self
     }
 
-    pub fn build(self) -> DataModel {
+    /// Construct the [`DataModel`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataClassificationError::ClientBuild`] if the provider client
+    /// cannot be constructed from the configured provider.
+    pub fn build(self) -> Result<DataModel, DataClassificationError> {
         DataModel::with_config(self.labels, self.config)
     }
 }
@@ -328,23 +390,28 @@ mod tests {
     #[test]
     fn data_model_builder_custom_config() {
         let model = DataModelBuilder::new()
-            .host("http://192.168.1.100")
-            .port(11435)
+            .provider(Provider::OpenAI)
+            .api_key("sk-test")
+            .base_url("https://proxy.internal/v1")
             .model("gpt-oss-safeguard:120b")
             .temperature(0.1)
             .label(LabelTemplate::new("L1").category(Label::Public, "Public."))
             .label(LabelTemplate::new("L2").category(Label::Public, "Public."))
-            .build();
+            .build()
+            .expect("client should build");
 
         assert_eq!(model.model(), "gpt-oss-safeguard:120b");
-        assert_eq!(model.config().host, "http://192.168.1.100");
-        assert_eq!(model.config().port, 11435);
+        assert_eq!(model.config().provider, Provider::OpenAI);
+        assert_eq!(
+            model.config().base_url.as_deref(),
+            Some("https://proxy.internal/v1")
+        );
         assert_eq!(model.labels().len(), 2);
     }
 
     #[test]
     fn data_model_from_toml() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../policies/ifc.toml");
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../.sondera/ifc.toml");
         let model = DataModel::from_toml(path).unwrap();
         assert_eq!(model.labels().len(), 1);
         assert_eq!(model.model(), "gpt-oss-safeguard:20b");

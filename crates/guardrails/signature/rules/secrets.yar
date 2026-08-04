@@ -233,8 +233,8 @@ rule secrets_database_credentials {
         // MongoDB connection string
         $mongodb = /mongodb(\+srv)?:\/\/[^:]+:[^@]+@/
 
-        // PostgreSQL connection string
-        $postgres = /postgres(ql)?:\/\/[^:]+:[^@]+@/
+        // PostgreSQL connection string (including SQLAlchemy driver suffixes like +asyncpg)
+        $postgres = /postgres(ql)?(\+\w+)?:\/\/[^:]+:[^@]+@/
 
         // MySQL connection string
         $mysql = /mysql:\/\/[^:]+:[^@]+@/
@@ -242,8 +242,18 @@ rule secrets_database_credentials {
         // Redis connection string with password
         $redis = /redis:\/\/:[^@]+@/
 
+        // Well-known default/dev credentials in connection strings (false positives)
+        $dev_pg = /:\/\/postgres:postgres@/
+        $dev_root = /:\/\/root:root@/
+        $dev_admin = /:\/\/admin:admin@/
+        $dev_user_pass = /:\/\/user:password@/ nocase
+        $dev_root_pass = /:\/\/root:password@/ nocase
+        $dev_admin_pass = /:\/\/admin:password@/ nocase
+        $dev_changeme = /:\/\/[^:]+:changeme@/ nocase
+
     condition:
-        any of them
+        any of ($mongodb, $postgres, $mysql, $redis) and
+        not any of ($dev_*)
 }
 
 rule secrets_jwt_tokens {
@@ -372,15 +382,68 @@ rule secrets_generic_passwords {
         date = "2025-11-26"
 
     strings:
-        // JSON/YAML password fields with values
+        // JSON/YAML password fields with values (quoted — 8+ chars)
         $pass1 = /"password"\s*:\s*"[^\s"]{8,}"/ nocase
         $pass2 = /'password'\s*:\s*'[^\s']{8,}'/ nocase
-        $pass3 = /password\s*[:=]\s*[^\s]{8,}/ nocase
 
-        // Common password variable names
+        // Unquoted password values — split into complexity-based patterns to
+        // filter pure-alpha short defaults (postgres, password, changeme)
+        // 11+ chars (any composition)
+        $pass3_long = /password\s*[:=]\s*[^\s]{11,}/ nocase
+        // 8+ chars containing at least one digit
+        $pass3_digit = /password\s*[:=]\s*[^\s]*[0-9][^\s]*/ nocase
+        // Contains a special character AND first byte is not `$` or `{` —
+        // excludes template expressions like `${{ ... }}`, `${VAR}`, `{{ ... }}`
+        // whose leading char would be a special. The any-length / any-position
+        // variant lives in `secrets_generic_passwords_loose` at info severity.
+        $pass3_special = /password\s*[:=]\s*[^\s$\{][^\s]*[^A-Za-z0-9\s][^\s]*/ nocase
+
+        // Common password variable names (quoted values, 8+ chars)
         $var1 = /PASSWORD\s*=\s*["'][^\s"']{8,}["']/
         $var2 = /PASS\s*=\s*["'][^\s"']{8,}["']/
         $var3 = /SECRET\s*=\s*["'][^\s"']{8,}["']/
+
+    condition:
+        any of them
+}
+
+rule secrets_generic_template_passwords {
+    meta:
+        description = "Detects passwords bound to CI/CD template expressions (${{ ... }}, ${VAR}, $VAR, $(var), {{ var }}). High-volume signal — flagged at medium severity."
+        severity = "medium"
+        category = "secrets_detection"
+        mitre_attack = "T1552.001"
+        author = "Sondera Security"
+        date = "2026-04-27"
+
+    strings:
+        // Shell-style `$VAR` / `${VAR}`, GitHub Actions / Azure Pipelines
+        // `${{ ... }}`, classic Azure Pipelines `$(var)`. The character class
+        // gates on the byte after `$` so literal special-char passwords like
+        // `password=$!a3#` (which the strict rule already catches) don't match.
+        $tpl_dollar = /password\s*[:=]\s*\$[\{(A-Za-z_]/ nocase
+        // Jinja2 / Helm / Liquid `{{ ... }}`
+        $tpl_brace = /password\s*[:=]\s*\{\{/ nocase
+
+    condition:
+        any of them
+}
+
+rule secrets_generic_passwords_loose {
+    meta:
+        description = "Permissive password pattern — high false-positive rate on template expressions; info-only signal"
+        severity = "info"
+        category = "secrets_detection"
+        mitre_attack = "T1552.001"
+        author = "Sondera Security"
+        date = "2026-04-27"
+
+    strings:
+        // Original `$pass3_special` from `secrets_generic_passwords`: any-length
+        // unquoted password value containing a special character. Fires on
+        // template expressions (`PASSWORD: ${{ ... }}`) so it lives here at
+        // info severity rather than in the strict rule.
+        $pass3_special = /password\s*[:=]\s*[^\s]*[^A-Za-z0-9\s][^\s]*/ nocase
 
     condition:
         any of them
@@ -434,4 +497,29 @@ rule secrets_ssh_config {
         $host and $ssh_host or
         $host and $ssh_pass or
         $identity and $ssh_key
+}
+
+// Broad sk- secret-key token detection.
+// Catches API secret keys from services (Mistral, Cohere, Pinecone, etc.)
+// that use the sk- prefix with lengths outside the OpenAI-specific rule
+// (exactly 48 chars) and the Anthropic-specific rule (sk-ant- + 95 chars).
+rule secrets_sk_api_token {
+    meta:
+        description = "Detects generic sk- prefixed API secret key tokens (20+ alphanumeric chars)"
+        severity     = "high"
+        category     = "secrets_detection"
+        mitre_attack = "T1552.001"
+        author       = "Sondera Security"
+        date         = "2025-03-26"
+
+    strings:
+        // sk- prefix with 20–47 alphanumeric chars (shorter than OpenAI's 48)
+        // Covers Mistral, Cohere, Pinecone, and other services using sk- prefix.
+        $sk_short = /\bsk-[A-Za-z0-9]{20,47}\b/
+
+        // sk- prefix with 49–94 chars (longer than OpenAI 48, shorter than Anthropic 95)
+        $sk_mid   = /\bsk-[A-Za-z0-9_\-]{49,94}\b/
+
+    condition:
+        any of them
 }

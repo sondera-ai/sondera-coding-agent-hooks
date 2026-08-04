@@ -16,7 +16,7 @@ use sondera_policy::{
 
 const BASELINE_TOML: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../../policies/policies.toml"
+    "/../../../.sondera/policies.toml"
 );
 
 // ---------------------------------------------------------------------------
@@ -28,7 +28,10 @@ fn baseline_model() -> PolicyModel {
 }
 
 fn single_policy_model(policy: PolicyTemplate) -> PolicyModel {
-    PolicyModelBuilder::new().policy(policy).build()
+    PolicyModelBuilder::new()
+        .policy(policy)
+        .build()
+        .expect("policy model should build")
 }
 
 fn assert_non_compliant(result: &PolicyClassification, expected_category: &str) {

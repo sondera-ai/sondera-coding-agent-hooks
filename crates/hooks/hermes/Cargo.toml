@@ -1,0 +1,25 @@
+[package]
+name = "sondera-hermes"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Sondera Team"]
+description = "Hermes Agent shell hooks implementation for Sondera Agentic Security Platform"
+
+[dependencies]
+sondera-harness-client = { workspace = true }
+sondera-hooks = { workspace = true }
+sondera-types = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+dirs = { workspace = true }
+serde_norway = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

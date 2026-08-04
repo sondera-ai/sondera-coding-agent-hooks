@@ -1,0 +1,23 @@
+[package]
+name = "sondera-antigravity"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Sondera Team"]
+description = "Antigravity CLI (agy) hooks implementation for Sondera Agentic Security Platform"
+
+[dependencies]
+sondera-harness-client = { workspace = true }
+sondera-hooks = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = { workspace = true }
+uuid = { version = "1.21", features = ["v4"] }
+dirs = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

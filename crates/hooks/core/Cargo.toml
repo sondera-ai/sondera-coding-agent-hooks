@@ -1,0 +1,33 @@
+[package]
+name = "sondera-hooks"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Shared hooks infrastructure for Sondera Agentic Security Platform"
+
+[dependencies]
+sondera-types = { workspace = true }
+sondera-harness-client = { workspace = true }
+
+chrono = "0.4"
+dirs = { workspace = true }
+dunce = { workspace = true }
+dotenvy = "0.15"
+futures-util = "0.3"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+which = "7.0"
+whoami = "1.6"
+
+[dev-dependencies]
+proptest = { workspace = true }
+tempfile = { workspace = true }
+# `start_paused` lets the hook-budget test advance the clock instantly.
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

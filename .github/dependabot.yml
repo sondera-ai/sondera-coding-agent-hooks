@@ -1,0 +1,9 @@
+version: 2
+updates:
+  # Actions are pinned to commit SHAs in .github/workflows/*, which is only safe
+  # if something moves the pins forward. Dependabot rewrites both
+  # the SHA and the trailing `# vX.Y.Z` comment.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

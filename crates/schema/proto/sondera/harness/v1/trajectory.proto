@@ -1,0 +1,705 @@
+syntax = "proto3";
+
+package sondera.harness.v1;
+
+import "google/api/field_behavior.proto";
+import "google/protobuf/struct.proto";
+
+// ============================================================================
+// Trajectory event model
+//
+// The wire mirror of the `sondera_types::trajectory` domain model. A trajectory
+// is the sequence of execution steps an agent takes; each step is one
+// TrajectoryEvent in one of four categories:
+//
+//   Action      — agent-initiated operations (tool calls, shell, files, fetches)
+//   Observation — environment responses (outputs, prompts, reasoning)
+//   Control     — lifecycle and policy evaluation (started, adjudicated, ...)
+//   State       — context snapshots (working dir, git branch, open files)
+//
+// Cedar policies are evaluated against these events to produce Adjudicated
+// decisions.
+//
+// NOTE ON FREE-FORM FIELDS: three fields are irreducibly dynamic —
+// ToolCall.arguments, ToolOutput.output, and Snapshot.variables. They are
+// google.protobuf.Struct, which stores every number as an IEEE-754 double.
+// Integers beyond 2^53 (nanosecond timestamps, snowflake IDs) passing through
+// these fields are rounded and cannot be recovered. Producers that must carry
+// exact large integers should encode them as strings.
+// ============================================================================
+
+// ----------------------------------------------------------------------------
+// Attribution
+// ----------------------------------------------------------------------------
+
+// The agent that generated an event.
+message Agent {
+  // Unique identifier for the agent.
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Identifier for the provider of the agent (for example: "anthropic").
+  string provider = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Runtime platform identifier (for example: "claude-code", "cursor").
+  string platform = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Who triggered an event.
+message Actor {
+  // The kind of entity that triggered the event.
+  enum ActorType {
+    ACTOR_TYPE_UNSPECIFIED = 0;
+    ACTOR_TYPE_HUMAN = 1;
+    ACTOR_TYPE_AGENT = 2;
+    ACTOR_TYPE_SYSTEM = 3;
+    ACTOR_TYPE_POLICY = 4;
+  }
+
+  // Identifier of the triggering entity.
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Which class of entity `id` refers to.
+  ActorType actor_type = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Event causation chain.
+message Causality {
+  // Correlation ID linking related operations.
+  string correlation_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // The event that caused this one, if any.
+  optional string causation_id = 2 [(google.api.field_behavior) = OPTIONAL];
+
+  // Parent event in hierarchical chains, if any.
+  optional string parent_id = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// ----------------------------------------------------------------------------
+// Root event
+// ----------------------------------------------------------------------------
+
+// The payload of a trajectory event, in one of four categories.
+message TrajectoryEvent {
+  oneof category {
+    Action action = 1;
+    Observation observation = 2;
+    Control control = 3;
+    State state = 4;
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Action — agent-initiated operations
+// ----------------------------------------------------------------------------
+
+// Agent-initiated operations.
+message Action {
+  oneof kind {
+    ToolCall tool_call = 1;
+    ShellCommand shell_command = 2;
+    WebFetch web_fetch = 3;
+    FileOperation file_operation = 4;
+  }
+}
+
+// Generic tool/function invocation.
+message ToolCall {
+  // Correlates this call with its ToolOutput observation.
+  string call_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Name of the invoked tool.
+  string tool = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Free-form tool arguments. See the note on free-form fields above.
+  google.protobuf.Struct arguments = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Shell command execution.
+message ShellCommand {
+  // Correlates this call with its ShellCommandOutput observation.
+  string call_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // The command line as submitted.
+  string command = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Working directory the command runs in, when known.
+  optional string working_dir = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Web fetch operation.
+message WebFetch {
+  // Correlates this call with its WebFetchOutput observation.
+  string call_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // The URL being fetched.
+  string url = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // The prompt the fetched content is being gathered for.
+  string prompt = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// File system operation.
+message FileOperation {
+  // The kind of file system operation.
+  enum FileOpType {
+    FILE_OP_TYPE_UNSPECIFIED = 0;
+    FILE_OP_TYPE_READ = 1;
+    FILE_OP_TYPE_WRITE = 2;
+    FILE_OP_TYPE_EDIT = 3;
+    FILE_OP_TYPE_DELETE = 4;
+  }
+
+  // Correlates this call with its FileOperationResult observation.
+  string call_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Which operation is being performed.
+  FileOpType operation = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Path being operated on.
+  string path = 3 [(google.api.field_behavior) = REQUIRED];
+
+  // New content, for write and edit operations.
+  optional string content = 4 [(google.api.field_behavior) = OPTIONAL];
+
+  // For edit operations, the content being replaced.
+  optional string old_content = 5 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// ----------------------------------------------------------------------------
+// Observation — environment responses
+// ----------------------------------------------------------------------------
+
+// Environment responses and agent observations.
+message Observation {
+  oneof kind {
+    Prompt prompt = 1;
+    Thought thought = 2;
+    ToolOutput tool_output = 3;
+    ShellCommandOutput shell_command_output = 4;
+    WebFetchOutput web_fetch_output = 5;
+    FileOperationResult file_operation_result = 6;
+  }
+}
+
+// User or system prompt input.
+message Prompt {
+  // Which conversational role produced the prompt.
+  enum PromptRole {
+    PROMPT_ROLE_UNSPECIFIED = 0;
+    PROMPT_ROLE_USER = 1;
+    PROMPT_ROLE_SYSTEM = 2;
+    PROMPT_ROLE_ASSISTANT = 3;
+  }
+
+  // The prompt text.
+  string content = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Who authored the prompt.
+  PromptRole role = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Internal reasoning (no side effects).
+message Thought {
+  // The reasoning text.
+  string thought = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Generic tool output.
+message ToolOutput {
+  // The ToolCall this output responds to.
+  string call_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Whether the tool call succeeded.
+  bool success = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Free-form tool output. See the note on free-form fields above.
+  google.protobuf.Value output = 3 [(google.api.field_behavior) = OPTIONAL];
+
+  // Failure detail, when success is false.
+  optional string error = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Shell command output.
+message ShellCommandOutput {
+  // The ShellCommand this output responds to.
+  string call_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Process exit status.
+  int32 exit_code = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Captured standard output.
+  string stdout = 3 [(google.api.field_behavior) = OPTIONAL];
+
+  // Captured standard error.
+  string stderr = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Web fetch output.
+message WebFetchOutput {
+  // The WebFetch this output responds to.
+  string call_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // The URL that was fetched.
+  string url = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // HTTP status code of the fetch.
+  int32 code = 3 [(google.api.field_behavior) = REQUIRED];
+
+  // The fetched content or its summary.
+  string result = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// File operation result.
+message FileOperationResult {
+  // The FileOperation this result responds to.
+  string call_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Whether the operation succeeded.
+  bool success = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // File content, for read operations.
+  optional string content = 3 [(google.api.field_behavior) = OPTIONAL];
+
+  // Failure detail, when success is false.
+  optional string error = 4 [(google.api.field_behavior) = OPTIONAL];
+
+  // File path associated with the operation, when provided by the hook.
+  optional string path = 5 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// ----------------------------------------------------------------------------
+// Control — lifecycle and policy evaluation
+// ----------------------------------------------------------------------------
+
+// Flow management and policy evaluation.
+message Control {
+  oneof kind {
+    Started started = 1;
+    Completed completed = 2;
+    Failed failed = 3;
+    Terminated terminated = 4;
+    Suspended suspended = 5;
+    Resumed resumed = 6;
+    Adjudicated adjudicated = 7;
+    Scanned scanned = 8;
+  }
+}
+
+// Agent started.
+message Started {
+  // The agent that started.
+  Agent agent = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // The task the agent was given, when known.
+  optional string task = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Agent completed successfully.
+message Completed {
+  // Summary of what the agent accomplished.
+  optional string summary = 1 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Agent failed.
+message Failed {
+  // Why the agent failed.
+  string reason = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Agent terminated externally.
+message Terminated {
+  // Why the agent was terminated.
+  string reason = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Who or what terminated the agent.
+  string terminated_by = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Agent suspended.
+message Suspended {
+  // Why the agent was suspended.
+  string reason = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Agent resumed.
+message Resumed {
+  // Who or what resumed the agent.
+  string resumed_by = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// The verdict of a policy evaluation.
+enum Decision {
+  DECISION_UNSPECIFIED = 0;
+  DECISION_ALLOW = 1;
+  DECISION_DENY = 2;
+  DECISION_ESCALATE = 3;
+}
+
+// The engine enforcement mode at evaluation time.
+enum Mode {
+  MODE_UNSPECIFIED = 0;
+  // Evaluate policies but always allow; emit adjudications for observability.
+  MODE_MONITOR = 1;
+  // Enforce policy decisions.
+  MODE_GOVERN = 2;
+  // Evaluate, allow, and generate remediation instructions on deny.
+  MODE_STEER = 3;
+}
+
+// Metadata extracted from a matching Cedar policy's @annotations.
+message PolicyMetadata {
+  // Policy ID from the @id annotation.
+  optional string policy_id = 1 [(google.api.field_behavior) = OPTIONAL];
+
+  // Description from the @description annotation.
+  optional string description = 2 [(google.api.field_behavior) = OPTIONAL];
+
+  // Whether this policy requires escalation to a human or other oracle.
+  bool escalate = 3 [(google.api.field_behavior) = OPTIONAL];
+
+  // The argument passed to @escalate, if any.
+  optional string escalate_arg = 4 [(google.api.field_behavior) = OPTIONAL];
+
+  // Custom key-value metadata from the policy annotations.
+  map<string, string> metadata = 5 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// LLM-generated remediation instructions for violations in Steer mode.
+message Steering {
+  // Step-by-step instructions for working around the violation.
+  repeated string instructions = 1 [(google.api.field_behavior) = OPTIONAL];
+
+  // Why the policies were violated and what triggered them.
+  string explanation = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// One matched signature rule.
+message SignatureGuardrailMatch {
+  // Stable rule identifier.
+  string rule = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Namespace for the matched rule, when the rule declares one.
+  optional string namespace = 2 [(google.api.field_behavior) = OPTIONAL];
+
+  // Rule metadata copied from the YARA rule definition.
+  map<string, string> metadata = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Structured results from signature-based guardrail scanning.
+message SignatureGuardrailResult {
+  // Whether any guardrail rules matched.
+  bool triggered = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Highest matched severity, when any signature matched.
+  optional string severity = 2 [(google.api.field_behavior) = OPTIONAL];
+
+  // Distinct categories covered by the matched signatures.
+  repeated string categories = 3 [(google.api.field_behavior) = OPTIONAL];
+
+  // Detailed match metadata for matched signatures.
+  repeated SignatureGuardrailMatch matches = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Structured result from IFC/data-sensitivity classification.
+message IfcGuardrailResult {
+  // Highest sensitivity label returned by classification.
+  string label = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Why classification fell back to the public default, when it did.
+  optional string fallback_reason = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Structured guardrail results captured during adjudication.
+message GuardrailResults {
+  // Signature/YARA-based content scanning results.
+  optional SignatureGuardrailResult signature = 1 [(google.api.field_behavior) = OPTIONAL];
+
+  // IFC/data-sensitivity classification result.
+  optional IfcGuardrailResult ifc = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Policy evaluation result.
+message Adjudicated {
+  // The final decision.
+  Decision decision = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // The engine mode at evaluation time.
+  //
+  // Consumers that cannot read this field MUST assume MODE_GOVERN. The domain
+  // default is Monitor — the permissive mode — so a dropped field would
+  // otherwise read back as "policy was only observed", under-reporting an
+  // enforced decision in the audit trail.
+  Mode mode = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Why the decision was reached.
+  optional string reason = 3 [(google.api.field_behavior) = OPTIONAL];
+
+  // Metadata from matching policies.
+  repeated PolicyMetadata metadata = 4 [(google.api.field_behavior) = OPTIONAL];
+
+  // Guardrail results captured during adjudication.
+  optional GuardrailResults guardrails = 5 [(google.api.field_behavior) = OPTIONAL];
+
+  // Steering instructions, populated only in Steer mode on deny.
+  optional Steering steering = 6 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// ----------------------------------------------------------------------------
+// Scan taxonomy
+// ----------------------------------------------------------------------------
+
+// Whether a signal relates to the environment, the agent, or governance.
+enum SignalFocus {
+  SIGNAL_FOCUS_UNSPECIFIED = 0;
+  SIGNAL_FOCUS_ENVIRONMENT = 1;
+  SIGNAL_FOCUS_AGENT = 2;
+  SIGNAL_FOCUS_GOVERNANCE = 3;
+}
+
+// Signal category taxonomy from AISI Tables 2-3.
+enum SignalCategory {
+  SIGNAL_CATEGORY_UNSPECIFIED = 0;
+  SIGNAL_CATEGORY_INPUT_ISSUES = 1;
+  SIGNAL_CATEGORY_INFRASTRUCTURE_FAILURE = 2;
+  SIGNAL_CATEGORY_TASK_DESIGN = 3;
+  SIGNAL_CATEGORY_STATIC_KNOWLEDGE = 4;
+  SIGNAL_CATEGORY_LOW_LEVEL_INCOHERENCE = 5;
+  SIGNAL_CATEGORY_HIGH_LEVEL_INCOHERENCE = 6;
+  SIGNAL_CATEGORY_SELF_CORRECTION = 7;
+  SIGNAL_CATEGORY_REFUSAL_BEHAVIOUR = 8;
+  SIGNAL_CATEGORY_TOOL_MISUSE = 9;
+  SIGNAL_CATEGORY_EVALUATION_AWARENESS = 10;
+  SIGNAL_CATEGORY_POLICY_VIOLATION = 11;
+  SIGNAL_CATEGORY_PRIVILEGE_ESCALATION = 12;
+  SIGNAL_CATEGORY_DATA_EXFILTRATION = 13;
+  SIGNAL_CATEGORY_DESTRUCTIVE_OPERATION = 14;
+  SIGNAL_CATEGORY_CREDENTIAL_EXPOSURE = 15;
+}
+
+// Severity of a detected signal.
+enum SignalSeverity {
+  SIGNAL_SEVERITY_UNSPECIFIED = 0;
+  SIGNAL_SEVERITY_INFO = 1;
+  SIGNAL_SEVERITY_LOW = 2;
+  SIGNAL_SEVERITY_MEDIUM = 3;
+  SIGNAL_SEVERITY_HIGH = 4;
+  SIGNAL_SEVERITY_CRITICAL = 5;
+}
+
+// The structural type of a trajectory message.
+enum MessageType {
+  MESSAGE_TYPE_UNSPECIFIED = 0;
+  MESSAGE_TYPE_TOOL_CALL = 1;
+  MESSAGE_TYPE_TOOL_RESULT = 2;
+  MESSAGE_TYPE_USER_INPUT = 3;
+  MESSAGE_TYPE_REASONING = 4;
+  MESSAGE_TYPE_LIFECYCLE = 5;
+  MESSAGE_TYPE_ADJUDICATION = 6;
+  MESSAGE_TYPE_STATE_CAPTURE = 7;
+}
+
+// The inferred intent or purpose of an event within the trajectory.
+enum AgentIntent {
+  AGENT_INTENT_UNSPECIFIED = 0;
+  AGENT_INTENT_INVESTIGATE = 1;
+  AGENT_INTENT_PLAN = 2;
+  AGENT_INTENT_IMPLEMENT = 3;
+  AGENT_INTENT_VERIFY = 4;
+  AGENT_INTENT_DEBUG = 5;
+  AGENT_INTENT_COMMUNICATE = 6;
+  AGENT_INTENT_LIFECYCLE = 7;
+  AGENT_INTENT_GOVERN = 8;
+}
+
+// Outcome assessment of a trajectory transcript.
+enum TranscriptOutcome {
+  TRANSCRIPT_OUTCOME_UNSPECIFIED = 0;
+  TRANSCRIPT_OUTCOME_SUCCESS = 1;
+  TRANSCRIPT_OUTCOME_PARTIAL = 2;
+  TRANSCRIPT_OUTCOME_FAILURE = 3;
+  TRANSCRIPT_OUTCOME_INTERRUPTED = 4;
+  TRANSCRIPT_OUTCOME_IN_PROGRESS = 5;
+}
+
+// A concrete signal detected in a trajectory event or transcript.
+message Signal {
+  // Whether this signal relates to the environment, agent, or governance.
+  SignalFocus focus = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // The signal category from the AISI taxonomy.
+  SignalCategory category = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Severity of this signal instance.
+  SignalSeverity severity = 3 [(google.api.field_behavior) = REQUIRED];
+
+  // What was detected and why it was flagged.
+  string description = 4 [(google.api.field_behavior) = REQUIRED];
+
+  // Event indices (0-based) in the transcript that evidence this signal.
+  repeated int32 evidence_indices = 5 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Structured result of scanning a single trajectory event.
+message EventScanResult {
+  // Step-by-step reasoning about this event before assigning the grade.
+  string explanation = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // The structural message type.
+  MessageType message_type = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // The inferred intent.
+  AgentIntent intent = 3 [(google.api.field_behavior) = REQUIRED];
+
+  // A concise one-sentence description of what happened.
+  string description = 4 [(google.api.field_behavior) = REQUIRED];
+
+  // Key entities referenced: file paths, tool names, URLs, commands.
+  repeated string key_entities = 5 [(google.api.field_behavior) = OPTIONAL];
+
+  // Whether this event produces side effects.
+  bool is_side_effecting = 6 [(google.api.field_behavior) = REQUIRED];
+
+  // Signals detected in this event.
+  repeated Signal signals = 7 [(google.api.field_behavior) = OPTIONAL];
+
+  // Scanner confidence in this classification (0.0 to 1.0).
+  double confidence = 8 [(google.api.field_behavior) = REQUIRED];
+
+  // Embedding vector of the description field.
+  repeated double embedding = 9 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// A logical work phase within a trajectory transcript.
+message TranscriptPhase {
+  // Short name: "Investigation", "Implementation", "Verification", etc.
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // One-sentence description of what happened in this phase.
+  string description = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Event indices (0-based) belonging to this phase.
+  repeated int32 event_indices = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// Hierarchical summary of an entire trajectory transcript.
+message TranscriptDigest {
+  // The trajectory being summarized.
+  string trajectory_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // A short title (under 80 chars) capturing the primary task.
+  string title = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // A 1-3 sentence narrative of what the agent did from start to finish.
+  string summary = 3 [(google.api.field_behavior) = REQUIRED];
+
+  // True when this digest summarizes an active trajectory before a terminal
+  // control event. Final terminal digests leave this false.
+  bool interim = 4 [(google.api.field_behavior) = OPTIONAL];
+
+  // Logical phases of work detected in the transcript.
+  repeated TranscriptPhase phases = 5 [(google.api.field_behavior) = OPTIONAL];
+
+  // Distinct file paths that were modified (written, edited, or deleted).
+  repeated string files_modified = 6 [(google.api.field_behavior) = OPTIONAL];
+
+  // Distinct tool names used during the trajectory.
+  repeated string tools_used = 7 [(google.api.field_behavior) = OPTIONAL];
+
+  // Total number of events in the transcript.
+  int32 total_events = 8 [(google.api.field_behavior) = REQUIRED];
+
+  // Count of events that produced side effects.
+  int32 side_effecting_count = 9 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Full behavioral scan of a trajectory transcript.
+message TranscriptScanResult {
+  // Step-by-step reasoning about the trajectory before assigning grades.
+  string explanation = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Overall outcome of the trajectory.
+  TranscriptOutcome outcome = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // One-sentence description of the trajectory outcome.
+  string outcome_description = 3 [(google.api.field_behavior) = REQUIRED];
+
+  // Aggregate severity across all detected signals.
+  SignalSeverity aggregate_severity = 4 [(google.api.field_behavior) = REQUIRED];
+
+  // Signals detected across the full transcript.
+  repeated Signal signals = 5 [(google.api.field_behavior) = OPTIONAL];
+
+  // Summary of policy adjudication events in the trajectory.
+  string adjudication_summary = 6 [(google.api.field_behavior) = OPTIONAL];
+
+  // Notable behavioral observations about the agent's approach.
+  repeated string behavioral_notes = 7 [(google.api.field_behavior) = OPTIONAL];
+
+  // Scanner confidence in the overall assessment (0.0 to 1.0).
+  double confidence = 8 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Message-level event scan.
+message MessageScan {
+  // The event that was scanned (causality source).
+  string source_event_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Structured scan result from the trajectory scanner.
+  EventScanResult result = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Transcript-level hierarchical digest.
+message TranscriptDigestScan {
+  // The event that triggered this scan (causality source).
+  string source_event_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Structured digest of the trajectory transcript.
+  TranscriptDigest result = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Transcript-level behavioral scan.
+message TranscriptScan {
+  // The event that triggered this scan (causality source).
+  string source_event_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Full behavioral scan result.
+  TranscriptScanResult result = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Result of LLM-based scanning at message or transcript level.
+message Scanned {
+  oneof scan {
+    MessageScan message = 1;
+    TranscriptDigestScan transcript_digest = 2;
+    TranscriptScan transcript_scan = 3;
+  }
+}
+
+// ----------------------------------------------------------------------------
+// State — context snapshots
+// ----------------------------------------------------------------------------
+
+// Context snapshots.
+message State {
+  oneof kind {
+    Snapshot snapshot = 1;
+  }
+}
+
+// Full environment snapshot.
+message Snapshot {
+  // Identifier for this snapshot.
+  string snapshot_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // The agent's working directory, when known.
+  optional string working_dir = 2 [(google.api.field_behavior) = OPTIONAL];
+
+  // Files currently open in the agent's context.
+  repeated string open_files = 3 [(google.api.field_behavior) = OPTIONAL];
+
+  // Checked-out git branch, when the workspace is a git repository.
+  optional string git_branch = 4 [(google.api.field_behavior) = OPTIONAL];
+
+  // Free-form environment variables. See the note on free-form fields above.
+  map<string, google.protobuf.Value> variables = 5 [(google.api.field_behavior) = OPTIONAL];
+}
