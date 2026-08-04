@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package sondera.harness.v1;
+
+import "google/api/field_behavior.proto";
+import "google/protobuf/timestamp.proto";
+import "sondera/harness/v1/trajectory.proto";
+
+// ============================================================================
+// HarnessService
+//
+// Agent governance API for real-time policy adjudication.
+// ============================================================================
+
+service HarnessService {
+  // Evaluate events against configured policies and guardrails.
+  rpc Adjudicates(AdjudicatesRequest) returns (AdjudicatesResponse);
+}
+
+// ============================================================================
+// Event — envelope carrying a typed trajectory event
+//
+// The payload is the fully-typed TrajectoryEvent from trajectory.proto, so the
+// wire is self-describing to generic proto tooling and non-Rust clients rather
+// than an opaque JSON blob.
+//
+// The event category and name are NOT carried as separate string fields: they
+// are structurally determined by which TrajectoryEvent oneof arm is set, so
+// denormalizing them would create a second source of truth that can disagree
+// with the payload.
+//
+// Events MUST be normalized before they reach the wire — clients map
+// provider-specific hook data into these typed fields rather than forwarding
+// raw provider payloads.
+// ============================================================================
+
+message Event {
+  // Unique event identifier (e.g., `evt-<uuid>`).
+  string event_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Trajectory this event belongs to.
+  string trajectory_id = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // The agent that generated this event.
+  Agent agent = 3 [(google.api.field_behavior) = REQUIRED];
+
+  // When this event occurred.
+  google.protobuf.Timestamp event_time = 4 [(google.api.field_behavior) = REQUIRED];
+
+  // Who triggered this event.
+  Actor actor = 5 [(google.api.field_behavior) = REQUIRED];
+
+  // Event causation chain.
+  Causality causality = 6 [(google.api.field_behavior) = REQUIRED];
+
+  // The typed event payload.
+  TrajectoryEvent event = 7 [(google.api.field_behavior) = REQUIRED];
+}
+
+// ============================================================================
+// Adjudication Request/Response
+// ============================================================================
+
+message AdjudicatesRequest {
+  // Events to evaluate against policies and guardrails.
+  repeated Event events = 1;
+}
+
+message AdjudicatesResponse {
+  // Events with adjudication results populated in their payloads.
+  repeated Event events = 1;
+}

@@ -1,86 +1,201 @@
 name: CI
 
+# One gate for the whole workspace, plus the main/tag release tail.
+#
+# Cache economics: GitHub scopes Actions caches so that a branch can *restore*
+# from the default branch but never *write* into its scope. So the only runs
+# that seed a shared cache are the ones on `main` — the push-to-main run and the
+# nightly schedule (which also executes with github.ref == refs/heads/main).
+# Every PR and merge-queue run restores those caches read-only via `save-if`,
+# which keeps PR builds warm without each PR uploading its own multi-GB target
+# dir and evicting main's entry from the 10 GB repo cache budget.
+#
+# The nightly run exists so the warm caches do not go stale (7-day eviction) on
+# a quiet week, and so `cargo deny` re-checks an unchanged dependency set
+# against a freshly published RustSec advisory DB.
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+    tags: ['apps-v*']
   pull_request:
+  merge_group:
+  schedule:
+    - cron: '0 5 * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # PR and merge-queue runs supersede themselves. Runs on main do not: each one
+  # seeds the shared caches and may publish a release, so cancelling an
+  # in-flight one on the next push would leave both jobs half-done.
+  group: ${{ github.ref == 'refs/heads/main' && format('ci-main-{0}', github.sha) || format('{0}-{1}', github.workflow, github.ref) }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  # Transient crates.io / static.rust-lang.org failures are the most common
+  # non-deterministic CI failure; retry instead of burning a rerun.
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
 
 jobs:
-  lint:
-    name: Lint
+  fmt:
+    name: Format
+    # Nothing to format-check on the nightly cache-warm run.
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4  # stable
         with:
-          components: rustfmt, clippy
+          toolchain: stable
+          components: rustfmt
 
-      - name: Cache Rust
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: lint
-
+      # Deliberately uncached: rustfmt parses, it does not compile, so a cache
+      # restore would cost more than the check. This is the fast-fail signal.
       - name: Rust format check
         run: cargo fmt --all -- --check
 
+  proto:
+    name: Proto
+    # `crates/schema/proto/buf.yaml` has been correct since the wire landed, but
+    # nothing ever ran it: eleven hook crates and the harness all depend on this
+    # schema and a rename could reach main unchallenged. Same fast-fail shape as
+    # Format — no Rust toolchain, no cache, buf only parses.
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+
+      - uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99  # v1.50.0
+        with:
+          github_token: ${{ github.token }}
+
+      - name: Buf lint
+        run: buf lint
+        working-directory: crates/schema/proto
+
+      - name: Buf format check
+        run: buf format --diff --exit-code
+        working-directory: crates/schema/proto
+
+      # CONTEXT: `buf breaking --against` is deliberately absent. It has no
+      # baseline to compare against yet — main carries no .proto files, and this
+      # branch introduced the wire wholesale. Add it in the first PR after this
+      # one lands, when main is a meaningful baseline.
+
+  lint:
+    name: Lint
+    # Runs on schedule too (default branch) to warm the shared `lint` cache.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4  # stable
+        with:
+          toolchain: stable
+          components: clippy
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
+        with:
+          shared-key: lint
+          # A run that fails at clippy has still compiled every dependency;
+          # save that work rather than making the next main run start cold.
+          cache-on-failure: true
+          # Only default-branch runs write the shared cache; PR and merge-queue
+          # runs restore it read-only (see the cache note at the top).
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
       - name: Clippy
-        run: cargo clippy --all-features -- -D warnings
+        # `--all-features` is the gate CI enforces (see CLAUDE.md). `--locked`
+        # keeps the resolved graph identical to Cargo.lock, so the cache key
+        # cannot drift out from under a PR.
+        run: cargo clippy --locked --all-features -- -D warnings
+
+      # Doc links are deny-level in [workspace.lints.rustdoc], so this fails on
+      # a stale [`Type`] reference. Kept in this job rather than split out: it
+      # reuses the lint job's warm target dir instead of needing a third cache.
+      - name: Doc links
+        run: cargo doc --locked --no-deps --workspace
 
   test:
     name: Test
+    # Runs on schedule too (default branch) to warm the shared `test` cache.
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4  # stable
+        with:
+          toolchain: stable
 
       - name: Cache Rust
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
         with:
+          # Separate from `lint`: the two build with different feature
+          # unification, so sharing one key would thrash a single entry.
           shared-key: test
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      # Provider-gated integration tests are #[ignore]d and need a live model
+      # provider; this run does not enable them.
       - name: Run cargo test
-        run: cargo test --workspace
+        run: cargo test --locked --workspace
 
   security:
     name: Security
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4  # stable
+        with:
+          toolchain: stable
 
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
+      # Prebuilt binary, no compile and no cargo-binstall bootstrap.
+      #
+      # CONTEXT: both pins are load-bearing. `tool: cargo-deny` (no version)
+      # resolves to whatever `latest` meant in the *action's* bundled manifest,
+      # so the stale v2.9.4 pin was installing cargo-deny 0.13.9 — which predates
+      # the `[graph]` section deny.toml uses and failed to parse the config at
+      # all. Pin the tool version too, so the scanner cannot drift with the action.
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60  # v2.85.7
+        with:
+          tool: cargo-deny@0.19.0
 
-      - name: Install Security Tools
-        run: cargo binstall cargo-deny cargo-audit -y
-
-      - name: Deny Check
+      # `cargo deny check` runs advisories / bans / licenses / sources off
+      # Cargo.lock — no workspace compile, so this job needs no Rust cache and
+      # never sits on the critical path. Advisory ignores live in deny.toml.
+      - name: Deny check
         run: cargo deny check
-
-      - name: Audit
-        run: cargo audit --deny warnings --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2025-0141 --ignore RUSTSEC-2024-0436 --ignore RUSTSEC-2025-0134
-
 
   build-apps:
     name: Build app binaries (${{ matrix.os }} - ${{ matrix.target }})
+    # Push-only: a green PR must not publish. Covers both the rolling `latest`
+    # prerelease from main and an explicit apps-v* tag — the tag arm was
+    # previously unreachable because `on: push` did not include tags.
+    if: >-
+      github.event_name == 'push'
+      && (github.ref == 'refs/heads/main'
+          || startsWith(github.ref, 'refs/tags/apps-v'))
+    needs: [fmt, proto, lint, test, security]
     runs-on: ${{ matrix.os }}
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/apps-v')
-    needs: [ test, lint, security ]
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -89,58 +204,58 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - os: macos-latest
             target: aarch64-apple-darwin
-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4  # stable
         with:
+          toolchain: stable
           targets: ${{ matrix.target }}
 
       - name: Cache Rust
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
         with:
           shared-key: apps-${{ matrix.target }}
+          cache-on-failure: true
 
-      - name: Build binaries
-        run: |
-          cargo build --release --target ${{ matrix.target }} \
-            -p sondera-claude \
-            -p sondera-copilot \
-            -p sondera-cursor \
-            -p sondera-gemini \
-            -p sondera-harness
+      - name: Build binary
+        run: cargo build --locked --release --target ${{ matrix.target }} -p sondera
 
       - name: Create archive
+        shell: bash
         run: |
-          tar -czvf sondera-${{ matrix.target }}.tar.gz \
-            -C target/${{ matrix.target }}/release \
-            sondera-claude sondera-copilot sondera-cursor sondera-gemini sondera-harness-server
+          bundle="sondera-${{ matrix.target }}"
+          mkdir -p "$bundle"
+          cp "target/${{ matrix.target }}/release/sondera" "$bundle/"
+          cp -R .sondera "$bundle/"
+          cp README.md LICENSE "$bundle/"
+          tar -czvf "$bundle.tar.gz" "$bundle"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: binaries-${{ matrix.target }}
           path: sondera-${{ matrix.target }}.*
 
   release-apps:
     name: Create GitHub Release for Apps
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/apps-v')
-    needs: [ build-apps ]
+    needs: [build-apps]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
+      # Elevated for this job only; every other job runs read-only.
       contents: write
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
           pattern: binaries-*
           path: dist
           merge-multiple: true
 
       - name: Create or Update GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest' }}
           name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'Latest Build' }}

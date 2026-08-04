@@ -9,31 +9,10 @@
  * - Environment variable manipulation
  */
 
-rule command_injection_shell_chaining {
-    meta:
-        description = "Detects shell command chaining operators (&&, ||, ;, |)"
-        severity = "critical"
-        category = "command_injection"
-        mitre_attack = "T1059.004"
-        author = "Sondera Security"
-        date = "2025-11-26"
-
-    strings:
-        $cmd1 = /\&\&\s*[a-zA-Z]/ // && followed by command
-        $cmd2 = /\|\|\s*[a-zA-Z]/ // || followed by command
-        $cmd3 = /;\s*[a-zA-Z]+/ // ; followed by command
-        $cmd4 = /\|\s*[a-zA-Z]+/ // | followed by command
-        $cmd5 = /`[^`]*\s[^`]*`/ // Backtick command substitution (requires space to avoid markdown false positives)
-        $cmd6 = /\$\([^\)]+\)/ // $() command substitution
-
-    condition:
-        any of them
-}
-
 rule command_injection_path_traversal {
     meta:
         description = "Detects path traversal patterns in commands"
-        severity = "high"
+        severity = "medium"
         category = "command_injection"
         mitre_attack = "T1083"
         author = "Sondera Security"
@@ -41,12 +20,16 @@ rule command_injection_path_traversal {
 
     strings:
         $path1 = "../" nocase
+        $path1b = "..\\" nocase // Windows separator
         $path2 = "..%2f" nocase // URL encoded
         $path3 = "..%5c" nocase // Backslash encoded
-        $path4 = /\.\.[\/]/ // Any traversal
 
     condition:
-        2 of them // Require multiple occurrences
+        // URL-encoded traversal is always suspicious.
+        // Plain ../ (or ..\) is common in normal paths — only flag at 7+
+        // occurrences across both spellings.
+        any of ($path2, $path3) or
+        #path1 + #path1b > 6
 }
 
 rule command_injection_dangerous_commands {
@@ -70,7 +53,7 @@ rule command_injection_dangerous_commands {
 rule command_injection_sensitive_files {
     meta:
         description = "Detects access to sensitive system files"
-        severity = "critical"
+        severity = "high"
         category = "command_injection"
         mitre_attack = "T1552.001"
         author = "Sondera Security"
@@ -81,14 +64,16 @@ rule command_injection_sensitive_files {
         $passwd = "/etc/passwd" nocase
         $shadow = "/etc/shadow" nocase
 
-        // SSH keys
-        $ssh_priv = "/.ssh/id_rsa" nocase
-        $ssh_keys = "/.ssh/authorized_keys" nocase
+        // SSH keys (both separators: Windows fleets report \-separated paths)
+        $ssh_priv = /[\/\\]\.ssh[\/\\]id_rsa/ nocase
+        $ssh_keys = /[\/\\]\.ssh[\/\\]authorized_keys/ nocase
 
         // Cloud credentials
-        $aws = "/.aws/credentials" nocase
-        $gcp = "/.config/gcloud" nocase
-        $azure = "/.azure/credentials" nocase
+        $aws = /[\/\\]\.aws[\/\\]credentials/ nocase
+        $gcp = /[\/\\]\.config[\/\\]gcloud/ nocase
+        // Windows gcloud config dir lives under %APPDATA%, no .config prefix
+        $gcp_win = /[\/\\]AppData[\/\\]Roaming[\/\\]gcloud/ nocase
+        $azure = /[\/\\]\.azure[\/\\]credentials/ nocase
 
         // Environment variables
         $env = "/proc/self/environ" nocase
@@ -98,12 +83,12 @@ rule command_injection_sensitive_files {
         $postgres = "/etc/postgresql" nocase
 
     condition:
-        any of them
+        2 of them
 }
 
 rule command_injection_environment_manipulation {
     meta:
-        description = "Detects manipulation of environment variables"
+        description = "Detects manipulation of dangerous environment variables (library injection)"
         severity = "high"
         category = "command_injection"
         mitre_attack = "T1574.007"
@@ -113,13 +98,10 @@ rule command_injection_environment_manipulation {
     strings:
         $ld_preload = "LD_PRELOAD" fullword ascii
         $ld_library = "LD_LIBRARY_PATH" fullword ascii
-        $path_mod = /PATH\s*=.*:/ fullword ascii
         $dyld = "DYLD_INSERT_LIBRARIES" fullword ascii
-        $prompt_cmd = "PROMPT_COMMAND" fullword ascii
-        $histfile = "HISTFILE" fullword ascii
 
     condition:
-        any of them
+        2 of them
 }
 
 rule command_injection_sql_injection {
@@ -156,12 +138,21 @@ rule command_injection_process_substitution {
         date = "2025-11-26"
 
     strings:
-        $proc1 = /<\([^\)]+\)/ // <() process substitution
-        $proc2 = />\([^\)]+\)/ // >() process substitution
-        $heredoc = /<<[A-Z_]+/ // Here document
+        // Require a shell boundary (whitespace or a command separator)
+        // immediately before the `<`/`>` operator. Real process substitution
+        // always starts where a command argument can begin (`diff <(a) <(b)`,
+        // `tee >(gzip)`), so the operator is preceded by space/`|`/`&`/`;`/`(`
+        // — never by an identifier char or a closing `>`. Without this guard
+        // the bare `<(` / `>(` patterns false-positive on ordinary source code,
+        // most notably Rust turbofish calls (`Ok::<_, T>(x)` -> `>(`) and
+        // generic tuples (`Vec<(String, String)>` -> `<(`). yara-x's regex
+        // engine has no look-behind, so the boundary char is consumed by the
+        // match; the scanner only uses match presence, so this is harmless.
+        $proc1 = /[\s|&;(]<\([^\)]+\)/ // <() process substitution
+        $proc2 = /[\s|&;(]>\([^\)]+\)/ // >() process substitution
 
     condition:
-        any of them
+        any of ($proc1, $proc2)
 }
 
 rule command_injection_obfuscated_separators {
@@ -174,8 +165,7 @@ rule command_injection_obfuscated_separators {
         date = "2025-11-26"
 
     strings:
-        // Tab characters as separators
-        $tab = /\t[a-z]{2,}/
+        // Double-encoded tab separators (actual tabs are ubiquitous in files)
         $tab2 = "%09%09"
 
         $url_encoded_exec = "%26%26" // &&
@@ -183,7 +173,7 @@ rule command_injection_obfuscated_separators {
         $url_encoded_exec3 = "%3B" // ;
 
     condition:
-        any of them
+        any of ($tab2, $url_encoded_exec, $url_encoded_exec2, $url_encoded_exec3)
 }
 
 rule command_injection_reverse_shell {
@@ -198,8 +188,8 @@ rule command_injection_reverse_shell {
     strings:
         $bash_tcp = "/dev/tcp/" nocase
         $bash_udp = "/dev/udp/" nocase
-        $nc_listen = /nc.*-[a-z]*l.*-[a-z]*p/ nocase
-        $nc_exec = /nc.*-[a-z]*e/ nocase
+        $nc_listen = /\bnc\s.*-[a-z]*l.*-[a-z]*p/ nocase
+        $nc_exec = /\bnc\s.*-[a-z]*e/ nocase
 
     condition:
         any of them

@@ -1,0 +1,30 @@
+[package]
+name = "sondera-settings"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Unified `.sondera` configuration directory: settings and policy asset resolution"
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+name = "sondera_settings"
+
+[dependencies]
+# The three model configs this resolves into. They are the reason this crate is
+# not merely a TOML reader: a settings file names a provider and a model, and
+# each consumer wants its own crate's config type back, already defaulted.
+sondera-information-flow-control = { workspace = true }
+sondera-policy = { workspace = true }
+sondera-provider = { workspace = true }
+sondera-trajectory = { workspace = true }
+dirs = "6"
+serde = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

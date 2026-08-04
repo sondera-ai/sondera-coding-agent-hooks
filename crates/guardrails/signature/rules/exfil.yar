@@ -8,6 +8,9 @@
      - MITRE ATT&CK T1041: Exfiltration Over C2 Channel
      - MITRE ATT&CK T1567: Exfiltration Over Web Service
 
+   Scope: each rule scans one event payload independently. These signatures do not
+   correlate a file read in one event with a later network action.
+
    Usage: These rules detect attempts to extract and transmit sensitive data including:
      - Sensitive file access patterns
      - External data transmission commands
@@ -24,26 +27,27 @@ rule data_exfiltration_sensitive_files {
         mitre_attack = "T1552.001"
 
     strings:
-        // SSH keys
-        $ssh1 = "/.ssh/id_rsa"
-        $ssh2 = "/.ssh/id_ed25519"
-        $ssh3 = "/.ssh/id_ecdsa"
-        $ssh4 = "/.ssh/known_hosts"
+        // SSH keys (both separators + nocase: Windows fleets report
+        // \-separated, case-insensitive paths)
+        $ssh1 = /[\/\\]\.ssh[\/\\]id_rsa/ nocase
+        $ssh2 = /[\/\\]\.ssh[\/\\]id_ed25519/ nocase
+        $ssh3 = /[\/\\]\.ssh[\/\\]id_ecdsa/ nocase
+        $ssh4 = /[\/\\]\.ssh[\/\\]known_hosts/ nocase
         $ssh5 = "-----BEGIN RSA PRIVATE KEY-----"
         $ssh6 = "-----BEGIN OPENSSH PRIVATE KEY-----"
 
-        // Environment files
-        $env1 = ".env"
-        $env2 = ".env.local"
-        $env3 = ".env.production"
-        $env4 = ".env.development"
+        // Environment files (anchored to path context to avoid substring false positives)
+        $env1 = /[\/\\]\.env\b/ nocase
+        $env2 = /[\/\\]\.env\.local\b/ nocase
+        $env3 = /[\/\\]\.env\.production\b/ nocase
+        $env4 = /[\/\\]\.env\.development\b/ nocase
 
-        // Certificate files
-        $cert1 = ".pem"
-        $cert2 = ".key"
-        $cert3 = ".crt"
-        $cert4 = ".pfx"
-        $cert5 = ".p12"
+        // Certificate files (anchored to path context to avoid substring false positives)
+        $cert1 = /[\/\\][^\s\/\\]*\.pem\b/
+        $cert2 = /[\/\\][^\s\/\\]*\.key\b/
+        $cert3 = /[\/\\][^\s\/\\]*\.crt\b/
+        $cert4 = /[\/\\][^\s\/\\]*\.pfx\b/
+        $cert5 = /[\/\\][^\s\/\\]*\.p12\b/
 
         // Database credentials
         $db1 = ".my.cnf"
@@ -62,28 +66,30 @@ rule data_exfiltration_cloud_credentials {
         mitre_attack = "T1552.001"
 
     strings:
-        // AWS credentials
-        $aws1 = "/.aws/credentials"
+        // AWS credentials (path patterns match both separators + nocase:
+        // Windows fleets report \-separated, case-insensitive paths)
+        $aws1 = /[\/\\]\.aws[\/\\]credentials/ nocase
         $aws2 = "aws_access_key_id"
         $aws3 = "aws_secret_access_key"
 
-        // GCP credentials
-        $gcp1 = "/.config/gcloud/application_default_credentials.json"
-        $gcp2 = "/.config/gcloud/credentials.db"
+        // GCP credentials (bare gcloud dir also covers the Windows
+        // %APPDATA%\gcloud location, which has no .config prefix)
+        $gcp1 = /[\/\\]gcloud[\/\\]application_default_credentials\.json/ nocase
+        $gcp2 = /[\/\\]gcloud[\/\\]credentials\.db/ nocase
         // GOOGLE_APPLICATION_CREDENTIALS
         $gcp3 = "service-account.json"
 
         // Azure credentials
-        $azure1 = "/.azure/accessTokens.json"
-        $azure2 = "/.azure/msal_token_cache.json"
+        $azure1 = /[\/\\]\.azure[\/\\]accessTokens\.json/ nocase
+        $azure2 = /[\/\\]\.azure[\/\\]msal_token_cache\.json/ nocase
 
         // OCI credentials
-        $oracle1 = "/.oci/oci_api_key.pem"
-        $oracle2 = "/.oci/oci_api_key_public.pem"
-        $oracle3 = "/.oci/sessions/"
+        $oracle1 = /[\/\\]\.oci[\/\\]oci_api_key\.pem/ nocase
+        $oracle2 = /[\/\\]\.oci[\/\\]oci_api_key_public\.pem/ nocase
+        $oracle3 = /[\/\\]\.oci[\/\\]sessions[\/\\]/ nocase
 
         // Vercel AI credentials
-        $vercel1 = "/.local/share/vercel/token"
+        $vercel1 = /[\/\\]\.local[\/\\]share[\/\\]vercel[\/\\]token/ nocase
 
     condition:
         any of them
@@ -97,20 +103,23 @@ rule data_exfiltration_cloud_configs {
         mitre_attack = "T1552.001"
 
     strings:
-        // Cloud provider configs
-        $aws1 = "/.aws/config"
-        $gcp1 = "/.config/gcloud/"
-        $gcp2 = "/.config/gcloud/configurations/"
-        $azure1 = "/.azure/"
-        $azure2 = "/.azure/azureProfile.json"
-        $azure3 = "/.azure/clouds.config"
-        $oracle1 = "/.oci/config"
-        $oracle2 = "/.oci/oci_cli_rc"
-        $vercel1 = "/.config/vercel/"
-        $vercel2 = "/.vercel/"
+        // Cloud provider configs (both separators + nocase: Windows fleets
+        // report \-separated, case-insensitive paths)
+        $aws1 = /[\/\\]\.aws[\/\\]config/ nocase
+        $gcp1 = /[\/\\]\.config[\/\\]gcloud[\/\\]/ nocase
+        $gcp2 = /[\/\\]gcloud[\/\\]configurations[\/\\]/ nocase
+        // Windows gcloud config dir lives under %APPDATA%, no .config prefix
+        $gcp3 = /[\/\\]AppData[\/\\]Roaming[\/\\]gcloud[\/\\]/ nocase
+        $azure1 = /[\/\\]\.azure[\/\\]/ nocase
+        $azure2 = /[\/\\]\.azure[\/\\]azureProfile\.json/ nocase
+        $azure3 = /[\/\\]\.azure[\/\\]clouds\.config/ nocase
+        $oracle1 = /[\/\\]\.oci[\/\\]config/ nocase
+        $oracle2 = /[\/\\]\.oci[\/\\]oci_cli_rc/ nocase
+        $vercel1 = /[\/\\]\.config[\/\\]vercel[\/\\]/ nocase
+        $vercel2 = /[\/\\]\.vercel[\/\\]/ nocase
 
         // kubernetes configs
-        $k8s1 = "/.kube/config"
+        $k8s1 = /[\/\\]\.kube[\/\\]config/ nocase
 
     condition:
         any of them
@@ -221,21 +230,39 @@ rule data_exfiltration_encoding_patterns {
 
 rule data_exfiltration_api_keys_in_transit {
     meta:
-        description = "Detects API keys in exfiltration context (combined with send/upload)"
+        description = "Detects API keys referenced alongside data-exfiltration language"
         severity = "critical"
         category = "exfiltration"
         mitre_attack = "T1552.001"
 
     strings:
-        // Exfiltration context keywords
-        $exfil1 = /send|upload|post|transmit/i
-        $exfil2 = /curl|wget|fetch/i
-
-        // Generic patterns (require exfiltration context)
-        $key_pattern = /[aA][pP][iI]_?[kK][eE][yY]|[sS][eE][cC][rR][eE][tT]/
+        // Fire only when an exfiltration *action* and an
+        // api-key/secret *token* co-occur on a SINGLE line ([^\n] gap, either
+        // order).  The old `(any phrase/tool) and (any key)` condition matched
+        // the two signals anywhere in the scanned blob, so a bare `curl` (from
+        // an install script) and an unrelated `secret` (an IAM resource name)
+        // on different lines of a large code-search output co-triggered a false
+        // positive.  Requiring same-line co-occurrence preserves the original
+        // dual-signal intent: neither a lone `curl`/`wget`, a lone `secret`,
+        // nor benign prose ("upload the file", "vulnerable to data
+        // exfiltration") fires on its own.
+        //
+        // Action = curl/wget, a data-transfer verb (send/upload/post/transmit,
+        // with trailing \s to skip compound identifiers like
+        // uploadPolicySources / sendMessage), or the word exfiltrate/ion.
+        // Key = api_key / secret as \b-bounded standalone tokens, so
+        // "SecretManager", "Secrets", "SecretKey", etc. do NOT substring-match
+        // (e.g. "upload to SecretManager" must not fire — common in this
+        // Secret-Manager-heavy codebase).
+        //
+        // Known limitation: a backslash-continued command splits the tool and
+        // the token across physical lines and evades both arms; the companion
+        // rule data_exfiltration_network_commands covers curl data-flag forms.
+        $action_then_key = /(\bcurl\b|\bwget\b|\b(send|upload|post|transmit)\s|\bexfiltrat(e|ion)\b)[^\n]{0,200}(\bapi_?key\b|\bsecret\b)/i
+        $key_then_action = /(\bapi_?key\b|\bsecret\b)[^\n]{0,200}(\bcurl\b|\bwget\b|\b(send|upload|post|transmit)\s|\bexfiltrat(e|ion)\b)/i
 
     condition:
-        (any of ($exfil*)) and $key_pattern
+        any of them
 }
 
 rule data_exfiltration_network_commands {
@@ -261,14 +288,21 @@ rule data_exfiltration_network_commands {
         $http1 = /POST\s+.*\s+HTTP\/[12]\.[01]/
         $http2 = /PUT\s+.*\s+HTTP\/[12]\.[01]/
 
-        // Python requests
+        // Python requests — write methods
         $py1 = /requests\.post\(/
         $py2 = /requests\.put\(/
-        $py3 = /urllib\.request\.urlopen\(/
+        $py3 = /requests\.(patch|delete)\(/
+        // urllib with data= argument (POST semantics)
+        $py4 = /urllib\.request\.urlopen\([^)]*data\s*=/
+        // aiohttp async write methods
+        $py5 = /aiohttp\.(ClientSession|request)\([^)]*method\s*=\s*'(POST|PUT|PATCH|DELETE)'/i
+        $py6 = /session\.(post|put|patch|delete)\(/
+        // httpx write methods
+        $py7 = /httpx\.(post|put|patch|delete)\(/
 
         // JavaScript fetch/axios
         $js1 = /fetch\(.*method:\s*['"]POST['"]/
-        $js2 = /axios\.post\(/
+        $js2 = /axios\.(post|put|patch|delete)\(/
 
         // Netcat data transmission
         $nc1 = /nc\s+.*\s+-[A-Za-z]*w/

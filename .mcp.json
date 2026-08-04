@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "sondera": {
+      "type": "stdio",
+      "command": "cargo",
+      "args": [
+        "run",
+        "--quiet",
+        "-p",
+        "sondera",
+        "--",
+        "mcp"
+      ],
+      "env": {}
+    }
+  }
+}

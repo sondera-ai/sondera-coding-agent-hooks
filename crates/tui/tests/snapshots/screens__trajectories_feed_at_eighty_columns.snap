@@ -1,0 +1,20 @@
+---
+source: crates/tui/tests/screens.rs
+expression: "render(&mut app, 80, 16)"
+---
+"▀▀▀▀ SONDERA  trajectories                                     console  ● READY "
+"▀▀▀▀ filter all runs   3 of 3                                                   "
+"┌RUNS · 3──────────────────────────────────────────────────────────────────────┐"
+"│ VERDICT     AGENT            STATUS     EVENTS DUR     SUMMARY               │"
+"│  ● ALLOW    claude-code      completed  42     4.2s    refactored the storag │"
+"│  ■ DENY     cursor           completed  42     4.2s    ■2 attempted a recurs │"
+"│  · NONE     codex            running    42     4.2s    ~ wiring the OTel spa │"
+"│                                                                              │"
+"│                                                                              │"
+"│                                                                              │"
+"│                                                                              │"
+"└──────────────────────────────────────────────────────────────────────────────┘"
+"┌KEYS──────────────────────────────────────────────────────────────────────────┐"
+"│ <↑↓/jk> move   <enter> open   <i> inspect   </> filter   <r> refresh   <t>   │"
+"│ theme   <q> quit                                                             │"
+"└──────────────────────────────────────────────────────────────────────────────┘"

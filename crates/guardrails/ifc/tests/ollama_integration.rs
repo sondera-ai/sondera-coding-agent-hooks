@@ -14,7 +14,7 @@ use sondera_information_flow_control::{
     DataModel, DataModelBuilder, Label, LabelTemplate, SensitivityClassification,
 };
 
-const BASELINE_TOML: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../policies/ifc.toml");
+const BASELINE_TOML: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../.sondera/ifc.toml");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -25,7 +25,10 @@ fn baseline_model() -> DataModel {
 }
 
 fn single_label_model(label: LabelTemplate) -> DataModel {
-    DataModelBuilder::new().label(label).build()
+    DataModelBuilder::new()
+        .label(label)
+        .build()
+        .expect("data model should build")
 }
 
 fn assert_sensitive(result: &SensitivityClassification, expected_label: Label) {

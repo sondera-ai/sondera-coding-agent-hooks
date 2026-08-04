@@ -27,3 +27,6 @@ target
 
 # Debug
 *.log
+
+# Local Sondera config kept beside the committed contributor default
+.sondera/*.bak

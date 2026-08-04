@@ -3,7 +3,7 @@ name = "sondera-mcp"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-description = "MCP server for Coding Agent Policy Generation"
+description = "MCP server for Cedar policy authoring and local console queries"
 authors.workspace = true
 repository.workspace = true
 
@@ -11,21 +11,33 @@ repository.workspace = true
 name = "sondera_mcp"
 crate-type = ["rlib"]
 
-[[bin]]
-name = "cedar-mcp"
-path = "src/main.rs"
-
 [dependencies]
 sondera-signature = { workspace = true }
 sondera-information-flow-control = { workspace = true }
 sondera-policy = { workspace = true }
+# The console read surface is reached over gRPC, not by opening the store: this
+# crate depends on `sondera-console` only for the sparkline composite its wire
+# messages carry, and on no storage crate at all.
+sondera-console = { workspace = true }
+sondera-schema = { workspace = true }
+sondera-types = { workspace = true }
 cedar-policy = { version = "4" }
-turbomcp = { version = "2", features = ["full"] }
-tokio = { version = "1", features = ["full"] }
+rmcp = { version = "1.8", features = ["server", "macros", "transport-io"] }
+schemars = { version = "1" }
+# Only `tokio::sync::RwLock` is used directly; rmcp declares the io
+# features its stdio transport needs.
+tokio = { version = "1", features = ["sync"] }
+tonic = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = { workspace = true }
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("http", "websocket", "tcp", "unix"))'] }
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+# Console projections are tested against events encoded by the real server-side
+# converters, which timestamp them.
+chrono = { workspace = true }
+
+[lints]
+workspace = true

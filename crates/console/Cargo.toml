@@ -1,0 +1,34 @@
+[package]
+name = "sondera-console"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Console gRPC read surface over the local Sondera agent/trajectory store"
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+name = "sondera_console"
+crate-type = ["rlib"]
+
+[dependencies]
+sondera-types = { workspace = true }
+sondera-schema = { workspace = true }
+# The console reads agents and trajectories; it has no use for the Cedar entity
+# store, so the `cedar` feature (and `cedar-policy` with it) stays off. Declared
+# by path rather than `workspace = true` because a workspace dependency cannot
+# have its `default-features` overridden by a member.
+sondera-storage = { path = "../storage", default-features = false }
+futures-core = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync"] }
+tonic = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+# The sparkline tests build event fixtures at fixed timestamps.
+chrono = { workspace = true }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "net", "time"] }
+
+[lints]
+workspace = true

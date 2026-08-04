@@ -190,9 +190,9 @@ rule obfuscation_character_substitution {
         $reversed2 = "tpircs" // "script" reversed
         $reversed3 = "lruc" // "curl" reversed
 
-        // Character insertion
-        $insert = /b\s*a\s*s\s*h/ // spaces between chars
-        $insert2 = /c\s*u\s*r\s*l/
+        // Character insertion (require at least one space to avoid matching plain words)
+        $insert = /b\s+a\s+s\s+h/ // spaces between chars
+        $insert2 = /c\s+u\s+r\s+l/
 
     condition:
         any of them
@@ -237,12 +237,12 @@ rule obfuscation_rot13_encoding {
         $rot13_curl = "phey" // "curl" in ROT13
         $rot13_eval = "riny" // "eval" in ROT13
         $rot13_exec = "rkrp" // "exec" in ROT13
-
-        // ROT13 pattern (gibberish-like)
-        $rot13_pattern = /[nopqrstuvwxyzabcdefghijklm]{20,}/
+        $rot13_python = "clguba" // "python" in ROT13
+        $rot13_script = "fpevcg" // "script" in ROT13
+        $rot13_system = "flfgrz" // "system" in ROT13
 
     condition:
-        any of them
+        2 of them
 }
 
 rule obfuscation_json_escape_sequences {
@@ -261,8 +261,9 @@ rule obfuscation_json_escape_sequences {
         // Mixed escape sequences
         $mixed_escape = /\\[nrtbf\\\/](\\[nrtbf\\\/]){10,}/
 
-        // Escaped quotes pattern
-        $quote_escape = /\\["'](\s*\\["']){5,}/
+        // Escaped quotes pattern (raised from 5 to 15 to avoid false positives on
+        // JSON config files with many quoted arguments in shell commands)
+        $quote_escape = /\\["'](\s*\\["']){15,}/
 
     condition:
         any of them
@@ -279,10 +280,7 @@ rule obfuscation_whitespace_manipulation {
 
     strings:
         // Excessive tabs
-        $tabs = /\t{10,}/
-
-        // Mixed spaces and tabs
-        $mixed_ws = /[ \t]{20,}/
+        $tabs = /\t{20,}/
 
         // Non-breaking spaces
         $nbsp = /\u00A0{5,}/
@@ -304,16 +302,20 @@ rule obfuscation_comment_hiding {
         date = "2025-11-26"
 
     strings:
-        // Bash comment with suspicious content
-        $bash_comment = /#.*eval/
-        $bash_comment2 = /#.*exec/
-        $bash_comment3 = /#.*curl.*sh/
+        // Hash comments hiding a call to eval(...) / exec(...). The
+        // function-call form keeps ordinary English ("# evaluate the
+        // config", "# execution context", "# removed via --disallowedTools")
+        // from matching while still catching `# eval(atob("..."))` payloads.
+        $bash_comment = /#.*\beval\s*\(/
+        $bash_comment2 = /#.*\bexec\s*\(/
+        // Hash comment hiding a curl | sh / curl | bash pipeline.
+        $bash_comment3 = /#.*\bcurl\b.*\|\s*(sh|bash)\b/
 
-        // Multi-line comment with code
-        $multiline = /\/\*.*eval.*\*\//
+        // C-style comment containing an eval(...) call on the same line.
+        $multiline = /\/\*.*\beval\s*\(.*\*\//
 
-        // HTML comment with script
-        $html_comment = /<!--.*script.*-->/
+        // HTML comment hiding an actual <script> tag (not just the word).
+        $html_comment = /<!--.*<script\b.*-->/
 
     condition:
         any of them
@@ -396,13 +398,29 @@ rule obfuscation_encoding_function_calls {
         $hex_decode = "unhexlify("
         $hex_decode2 = "hex2bin("
 
-        // Combined with execution
-        $eval = "eval"
-        $exec = "exec"
-        $system = "system"
+        // Decode-to-execute pipelines — always suspicious
+        $pipe_exec = /base64\s*-d\s*\|\s*(sh|bash|python|perl)/
+        // Sequential: decode(...); eval(...)
+        $decode_then_eval = /(atob|base64_decode|unhexlify|hex2bin)\s*\([^)]*\)\s*[);,]\s*(eval|exec)\s*\(/
+        // Nested: eval(atob(...)), exec(base64_decode(...)), etc.
+        $eval_of_decode = /(eval|exec)\s*\(\s*(atob|base64_decode|unhexlify|hex2bin|urldecode)\s*\(/
+
+        // Python-specific: exec(base64.b64decode(...)) — not caught by $eval_of_decode
+        // because Python uses the dotted module form `base64.b64decode`, not `base64_decode`.
+        $py_b64exec = /(eval|exec)\s*\(\s*base64\.b64decode\s*\(/
+
+        // Python-specific: exec(compile(<decode>(...))) — dynamic compilation of a decoded payload.
+        // Plain exec(compile(source_var, ...)) without a decode step is not flagged.
+        $py_compile = /exec\s*\(\s*compile\s*\(\s*(base64\.[a-z0-9_]+\s*\(|unhexlify\s*\(|hex2bin\s*\(|b64decode\s*\()/
+
+        // Node.js: eval(Buffer.from(<data>, 'base64').toString())
+        $js_buf_b64 = /eval\s*\(\s*Buffer\.from\s*\([^)]*'base64'\)/
 
     condition:
-        ($b64_decode or $b64_decode2 or $b64_decode3 or $url_decode
-        or $url_decode2 or $hex_decode or $hex_decode2) and
-        ($eval or $exec or $system)
+        // Direct decode-to-execute patterns are always suspicious.
+        // Multiple decode functions together suggest obfuscation even without
+        // an explicit exec (the decoded payload may self-execute).
+        any of ($pipe_exec, $decode_then_eval, $eval_of_decode,
+                $py_b64exec, $py_compile, $js_buf_b64) or
+        (2 of ($b64_decode*) or 2 of ($url_decode*) or 2 of ($hex_decode*))
 }

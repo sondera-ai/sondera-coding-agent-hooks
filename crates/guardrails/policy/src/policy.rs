@@ -1,7 +1,7 @@
 use crate::PolicyError;
 use schemars::JsonSchema as JsonSchemaDerive;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::fmt;
 use std::path::Path;
 
@@ -33,7 +33,7 @@ pub struct PolicyExample {
 /// A policy template following the gpt-oss-safeguard Harmony prompt format
 /// with multi-category severity tiers.
 ///
-/// Each template defines a set of [`PolicyCategory`] tiers. The model evaluates
+/// Each template defines a set of `PolicyCategory` tiers. The model evaluates
 /// content and returns a policy-referencing output with `violation` (0 or 1)
 /// and `policy_category` indicating which tier applies.
 /// The `{prefix}0` category is always the safe / compliant tier.
@@ -258,6 +258,19 @@ impl PolicyClassification {
     /// Get policy violation categories as a set.
     pub fn categories(&self) -> HashSet<String> {
         self.violations.iter().map(|v| v.category.clone()).collect()
+    }
+
+    /// Get the violated category *codes* as a set, e.g. `{"SC2"}`.
+    ///
+    /// This is what a Cedar condition matches on: the codes are a closed set
+    /// declared in `policies.toml` and served to policy authors, whereas
+    /// [`categories`](Self::categories) returns the human-readable names, which
+    /// are prose and not stable enough to key a control on.
+    ///
+    /// Ordered, unlike its sibling, because this set reaches a policy engine: the
+    /// same classification has to serialize identically every time.
+    pub fn codes(&self) -> BTreeSet<String> {
+        self.violations.iter().map(|v| v.rule.clone()).collect()
     }
 
     /// Get violations of a specific category (case-insensitive).

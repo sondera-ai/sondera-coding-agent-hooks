@@ -1,0 +1,97 @@
+# Sondera project configuration.
+#
+# Merged with ~/.sondera/sondera.toml, this file winning key by key. Found by
+# walking up from the working directory, so it applies from any subdirectory of
+# the checkout. Unknown keys are rejected rather than ignored: a mistyped
+# setting in a governance config is reported at startup, never silently
+# dropped.
+#
+# The policy assets live beside this file and are not configured here: the
+# harness loads `ifc.toml`, `policies.toml`, and `policies/cedar/` from this
+# directory, each falling back to ~/.sondera when absent. Point the server at a
+# different directory with `sondera serve --config-dir`.
+#
+# ── For contributors ─────────────────────────────────────────────────────────
+#
+# Everything below runs against a local Ollama server, so a clone needs no
+# credential and no cloud account:
+#
+#   ollama serve
+#   ollama pull gpt-oss-safeguard:20b
+#   cargo run -p sondera -- serve -v
+#
+# Those are 20B models: seconds, not milliseconds, per call on CPU — and the
+# guardrails sit on the adjudication path, so that is latency the agent waits
+# out. To run with no model at all, set `[guardrails] enabled = false`; Cedar
+# still adjudicates every event, it just evaluates without `context.label` or
+# `context.policy`.
+#
+# Any other provider is a one-line change to `provider`, plus whatever that
+# provider needs — an `api_key`, a `base_url`, or for Vertex AI a `project` and
+# `location`. Model support comes from rig, so its provider documentation is
+# the reference for what each one expects: https://docs.rs/rig-core (the
+# `rig::providers` module). The names this file accepts are the `Provider` enum
+# in `crates/provider/src/provider.rs`.
+#
+# Two things that catch people switching:
+#
+#   - `base_url` defaults to the local Ollama endpoint *only* while the
+#     provider is Ollama. Name anything else and that default drops away.
+#   - Credentials do not belong in this file — it is checked in. Export
+#     SONDERA_GUARDRAIL_API_KEY and SONDERA_SCANNER_API_KEY instead; both
+#     override `api_key` from either config scope.
+
+[harness]
+# Where `sondera serve` listens — the harness and console gRPC services share
+# this address. The MCP server uses stdio and binds no network endpoint. The
+# hooks' default endpoint is http://127.0.0.1:50051, so leave this alone unless
+# you change both.
+# Overridden by `sondera serve --addr`.
+addr = "127.0.0.1:50051"
+
+# In-loop model guardrails, both gated by this one `enabled` key:
+# data-sensitivity classification (`ifc.toml`), which fills `context.label`, and
+# policy-category classification (`policies.toml`), which fills
+# `context.policy`. Both sit on the adjudication path, so they add latency to
+# every decision they touch: one model call per event for the label, plus one per
+# policy template for the categories. Each fails open — to `Public` and to
+# compliant — so a provider outage degrades coverage rather than blocking the
+# agent.
+[guardrails]
+enabled = true
+provider = "ollama"
+base_url = "http://localhost:11434"
+model = "gpt-oss-safeguard:20b"
+temperature = 0.0
+
+# Size the two separately with `[guardrails.data]` and `[guardrails.policy]`; a
+# key on either wins over the shared one above, even when the shared value came
+# from the nearer file — specificity beats proximity. Left unset here so this
+# file names one model rather than three, but a real deployment usually wants
+# the split:
+#
+#   - `[guardrails.data]` is the data-sensitivity (IFC) classifier. It runs once
+#     per event over whole file contents and decides one label for the document,
+#     so it takes the *larger* model — under-labelling there silently disarms
+#     every `resource.label` rule downstream, since the Cedar rule still
+#     evaluates, it just never matches.
+#   - `[guardrails.policy]` runs once per template in `policies.toml` on every
+#     adjudication, with the agent blocked while it does, so its cost grows as
+#     templates are added. It takes the cheapest model that holds up.
+
+# Trajectory scanner: post-hoc log analysis, not enforcement. It runs off the
+# adjudication path, so it never changes a decision — it classifies each event,
+# digests a finished run, and flags behavioral signals, all of which the console
+# renders. It costs one model call per event, and it does not inherit from
+# [guardrails] above: enforcement and analysis are sized and priced differently,
+# so the provider is named again here even though it is the same one.
+#
+# Off by default because a second 20B call per event is a lot to hand someone
+# who just wants to watch the harness run. `ollama pull gpt-oss:20b` and flip
+# `enabled` once the guardrail path works.
+[scanner]
+enabled = false
+provider = "ollama"
+base_url = "http://localhost:11434"
+model = "gpt-oss:20b"
+temperature = 0.0

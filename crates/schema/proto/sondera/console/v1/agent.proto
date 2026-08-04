@@ -1,0 +1,119 @@
+syntax = "proto3";
+
+package sondera.console.v1;
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/timestamp.proto";
+import "sondera/console/v1/trajectory.proto";
+
+// Console BFF surface for agents: the AgentSummary read model plus the
+// request/response messages for the agent RPCs on ConsoleService
+// (console.proto).
+//
+// The coding-agent domain models agent identity as id / provider / platform and
+// normalizes hook events into trajectory actions rather than collecting
+// capability documents.
+
+// UI-only agent liveness rollup. Distinct from agent identity itself; these
+// values drive the green/yellow/red dot in the console agent view.
+enum AgentStatus {
+  AGENT_STATUS_UNSPECIFIED = 0;
+  AGENT_STATUS_HEALTHY = 1;
+  AGENT_STATUS_DEGRADED = 2;
+  AGENT_STATUS_OFFLINE = 3;
+}
+
+// Full console agent detail.
+message Agent {
+  option (google.api.resource) = {
+    type: "sondera.ai/Agent"
+    pattern: "agents/{agent}"
+    singular: "agent"
+    plural: "agents"
+  };
+
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  AgentSummary summary = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// BFF projection of an agent for the console UI. `provider` and `platform` are
+// the harness-owned identity fields; everything else is a liveness rollup
+// computed from the agent's stored trajectory events.
+message AgentSummary {
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+  string display_name = 2 [(google.api.field_behavior) = REQUIRED];
+  AgentStatus status = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  int32 health_score = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+  google.protobuf.Timestamp last_seen = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
+  int32 runs_today = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+  double deny_rate = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Precomputed strip for the agent's most recent trajectory.
+  TrajectorySparkline sparkline = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // Agent provider, e.g. "anthropic". Harness-owned: registered when a hook
+  // first reports in, never writable through this surface.
+  string provider = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Runtime platform, e.g. "claude-code". Harness-owned, like `provider`.
+  string platform = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+// Agent rollup backing the AnalyzeAgents custom method. All fields are computed
+// aggregates over the (optionally filtered) agent set.
+message AgentStats {
+  int32 total = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+  int32 healthy = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+  int32 degraded = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+  int32 offline = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
+}
+
+message ListAgentsRequest {
+  // Page size defaults to 50 and clamps at 250, as defined by
+  // sondera_types::console::{DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE}.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+  // Whitespace-separated `key=value` clauses: `agent=agents/{agent}` narrows to
+  // one agent, `provider={provider}` and `platform={platform}` narrow by
+  // identity. An unrecognized key is INVALID_ARGUMENT rather than a silent
+  // no-op.
+  string filter = 3 [(google.api.field_behavior) = OPTIONAL];
+  // `{field}` or `{field} asc|desc`, over `last_active_time` (default,
+  // descending), `display_name`, or `runs_today`.
+  string order_by = 4 [(google.api.field_behavior) = OPTIONAL];
+}
+
+message ListAgentsResponse {
+  repeated AgentSummary agents = 1;
+  string next_page_token = 2;
+  int32 total_size = 3;
+}
+
+message GetAgentRequest {
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sondera.ai/Agent"
+  ];
+}
+
+message UpdateAgentRequest {
+  // Validated but not persisted today: agent identity (`provider`, `platform`)
+  // is harness-owned, `display_name` is derived from the id, and the remaining
+  // fields are OUTPUT_ONLY rollups — see UpdateAgent on ConsoleService
+  // (console.proto).
+  AgentSummary agent = 1 [(google.api.field_behavior) = REQUIRED];
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+message AnalyzeAgentsRequest {
+  // Same grammar as ListAgentsRequest.filter, so stats scope the same way the
+  // roster does.
+  string filter = 1 [(google.api.field_behavior) = OPTIONAL];
+}
+
+message DeleteAgentRequest {
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "sondera.ai/Agent"
+  ];
+}

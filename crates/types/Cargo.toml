@@ -1,0 +1,40 @@
+[package]
+name = "sondera-types"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Core proto-free domain types for the Sondera coding-agent harness"
+
+[lib]
+name = "sondera_types"
+crate-type = ["rlib"]
+
+[features]
+clap = ["dep:clap"]
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = ["preserve_order"] }
+# Fingerprints the file bodies `trajectory::redact` strips before persistence.
+sha2 = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+uuid = { workspace = true, features = ["serde"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+futures-core = { workspace = true }
+schemars = { workspace = true }
+strum_macros = { workspace = true }
+cedar-policy = { workspace = true }
+# `From<tonic::Status>` for HarnessClientError lives in error.rs; this is the
+# crate's only proto/gRPC coupling (no prost/prost-types).
+tonic = { workspace = true }
+clap = { workspace = true, features = ["derive"], optional = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+rstest = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros"] }
+
+[lints]
+workspace = true

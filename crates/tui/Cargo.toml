@@ -1,0 +1,37 @@
+[package]
+name = "sondera-tui"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Terminal reading view over the Sondera console trajectory surface"
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+name = "sondera_tui"
+crate-type = ["rlib"]
+
+[dependencies]
+# The generated `sondera.console.v1` client. The TUI is a pure gRPC consumer of
+# `sondera serve`, so it depends on the wire schema and nothing beneath it — no
+# Turso, no Cedar, no store traits.
+sondera-schema = { workspace = true }
+
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+color-eyre = { workspace = true }
+futures = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }
+tonic = { workspace = true }
+prost-types = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }
+rstest = { workspace = true }
+
+[lints]
+workspace = true

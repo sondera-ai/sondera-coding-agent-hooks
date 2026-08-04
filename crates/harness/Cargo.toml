@@ -11,39 +11,55 @@ repository.workspace = true
 name = "sondera_harness"
 crate-type = ["rlib"]
 
-[[bin]]
-name = "sondera-harness-server"
-path = "src/bin/server.rs"
-
+[features]
+# `client` is the lightweight surface consumed by crates/hooks/*: domain types,
+# the `HarnessClient` trait, and the gRPC `HarnessGrpcClient`. It deliberately
+# pulls in none of the Cedar / Turso / Ollama engine dependencies.
+#
+# `server` is the generic gRPC server transport (the `rpc` module). It is
+# engine-agnostic — it serves any `Harness` impl — so it does NOT pull in the
+# engine. This keeps the transport (and its round-trip test) buildable without
+# the heavy Cedar/Turso/Ollama/YARA stack.
+#
+# `engine` preserves the historical Cedar engine re-exports for embedders.
+# New code can depend on `sondera-cedar-policy` directly.
+# `scanner` adds the background trajectory scanner dispatched from the gRPC
+# server. It is separate from `server` because it links the LLM provider stack
+# through `sondera-trajectory`: a deployment that only enforces policy should
+# not carry rig and its provider clients. The transport holds the dispatcher as
+# a trait object, so turning this off changes no signature.
+default = ["server", "engine", "scanner"]
+client = []
+server = ["client"]
+scanner = ["server", "dep:sondera-trajectory"]
+engine = ["dep:sondera-cedar-policy", "dep:sondera-storage"]
 [dependencies]
-cedar-policy = { version = "4" }
+# --- always available (client + server) ---
+sondera-types = { workspace = true }
+sondera-schema = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
-strum_macros = "0.27.2"
-strum = { version = "0.27.2", features = ["derive"] }
-anyhow = "1.0"
-dirs = "6"
-fjall = "3"
-turso = "0.4"
-ollama-rs = { version = "0.3", features = [] }
-schemars = { version = "1.2", features = ["preserve_order"] }
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync"] }
 thiserror = "2"
-tarpc = { version = "0.37", features = ["tokio1", "serde1", "serde-transport", "unix"] }
-tokio-serde = { version = "0.9", features = ["json"] }
-futures = "0.3"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-clap = { version = "4.5", features = ["derive"] }
-shlex = "1"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time"] }
+tonic = { workspace = true }
 
-# Guardrail crates
-sondera-information-flow-control = { path = "../guardrails/ifc" }
-sondera-policy = { path = "../guardrails/policy" }
-sondera-signature = { path = "../guardrails/signature" }
+# --- background trajectory scanning (`scanner`) ---
+sondera-trajectory = { workspace = true, optional = true }
+
+# --- engine compatibility surface ---
+sondera-cedar-policy = { workspace = true, optional = true }
+sondera-storage = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3"
-tokio = { version = "1", features = ["rt", "macros"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "net", "time"] }
+# The background-scan wiring tests run a stub scanner against a real in-memory
+# store: what they assert is that the dispatcher persists to the right tables
+# and appends the right ledger event, which a store mock could only restate.
+sondera-storage = { workspace = true }
+
+[lints]
+workspace = true

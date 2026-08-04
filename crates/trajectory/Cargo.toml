@@ -1,0 +1,34 @@
+[package]
+name = "sondera-trajectory"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "LLM trajectory log analysis: message-, digest-, and transcript-level scanners"
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+name = "sondera_trajectory"
+
+[dependencies]
+# The scan result types (`EventScanResult`, `TranscriptDigest`,
+# `TranscriptScanResult`) are domain types, not scanner types: the policy engine
+# and the console read them without linking a model provider.
+sondera-types = { workspace = true }
+# The runtime-selected provider backbone. The scanner names a model and a
+# rubric; which vendor serves it is a deployment choice.
+sondera-provider = { workspace = true }
+# `schemars` derives the JSON schema each rubric constrains the model to. It is
+# not optional: the extractor is what makes the output structured.
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

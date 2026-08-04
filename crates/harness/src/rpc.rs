@@ -1,216 +1,204 @@
-//! tarpc-based RPC service for the Sondera harness.
+//! gRPC server for the Sondera harness.
 //!
-//! This module provides a tarpc service definition for remote policy adjudication,
-//! enabling IPC between client applications and the harness server.
+//! Implements the generated `sondera.harness.v1` [`HarnessService`] over tonic,
+//! fronting any [`Harness`] engine (e.g. [`CedarPolicyHarness`](crate::CedarPolicyHarness)).
+//! Incoming wire [`sondera_schema`] events are decoded into
+//! [`sondera_types::Event`] domain values via the DTO conversions, adjudicated,
+//! and the results re-encoded as response events.
+//!
+//! There is no authentication: every caller adjudicates against the same policy
+//! set and the same entity store.
 
-use crate::harness::Harness;
-use crate::types::{Adjudicated, Event};
-use anyhow::Result;
-use futures::prelude::*;
-use std::path::Path;
+use crate::scan::ScanDispatch;
+use crate::types::{AdjudicatedEvent, Event, Harness};
+use sondera_schema::harness_v1 as pb;
+use sondera_schema::harness_v1::harness_service_server::{HarnessService, HarnessServiceServer};
+use std::net::SocketAddr;
 use std::sync::Arc;
-use tarpc::server::{BaseChannel, Channel};
-use tarpc::{client, context};
-use tokio_serde::formats::Json;
+use tonic::{Request, Response, Status};
 
-/// Default socket path for the harness IPC server.
-///
-/// Prefers `/var/run/sondera/` for system-wide visibility, falling back to
-/// `~/.sondera/` when the system path is not writable.
-pub fn default_socket_path() -> std::path::PathBuf {
-    let system_dir = std::path::PathBuf::from("/var/run/sondera");
-    if std::fs::create_dir_all(&system_dir).is_ok() {
-        return system_dir.join("sondera-harness.sock");
-    }
+/// Environment variable naming the address the server binds to.
+const ADDR_ENV: &str = "SONDERA_HARNESS_ADDR";
+/// Default bind address when [`ADDR_ENV`] is unset.
+const DEFAULT_ADDR: &str = "127.0.0.1:50051";
+/// 16 MiB, matching the client, to accommodate large trajectory events.
+const MAX_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
 
-    dirs::home_dir()
-        .map(|h| h.join(".sondera"))
-        .unwrap_or_else(|| std::path::PathBuf::from("/var/run/sondera"))
-        .join("sondera-harness.sock")
+/// Resolve the server bind address from the environment, falling back to the
+/// local default.
+pub fn default_addr() -> SocketAddr {
+    std::env::var(ADDR_ENV)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| DEFAULT_ADDR.parse().expect("valid default addr"))
 }
 
-/// tarpc service definition for the Sondera harness.
-#[tarpc::service]
-pub trait HarnessService {
-    /// Adjudicate an event against configured policies.
-    async fn adjudicate(event: Event) -> Result<Adjudicated, String>;
-
-    /// Health check endpoint.
-    async fn health() -> bool;
-}
-
-/// Server implementation of the HarnessService.
-pub struct HarnessServer<H> {
+/// tonic service adapter that dispatches `Adjudicates` RPCs to a [`Harness`].
+pub struct HarnessGrpcService<H> {
     harness: Arc<H>,
+    /// Background trajectory scanner, when one is configured. `None` is the
+    /// default and the fully supported state: scanning is enrichment, and a
+    /// harness without it enforces exactly the same policy.
+    scans: Option<Arc<dyn ScanDispatch>>,
 }
 
-impl<H> Clone for HarnessServer<H> {
-    fn clone(&self) -> Self {
+impl<H> HarnessGrpcService<H> {
+    pub fn new(harness: Arc<H>) -> Self {
         Self {
-            harness: Arc::clone(&self.harness),
+            harness,
+            scans: None,
         }
     }
-}
 
-impl<H: Harness + 'static> HarnessServer<H> {
-    pub fn new(harness: Arc<H>) -> Self {
-        Self { harness }
+    /// Scan each adjudicated event in the background through `scans`.
+    ///
+    /// A trait object rather than a type parameter so attaching a scanner does
+    /// not change this service's type, and so the store the scanner writes
+    /// through stays the caller's business.
+    #[must_use]
+    pub fn with_scans(mut self, scans: Arc<dyn ScanDispatch>) -> Self {
+        self.scans = Some(scans);
+        self
     }
 }
 
-impl<H: Harness + 'static> HarnessService for HarnessServer<H> {
-    async fn adjudicate(self, _: context::Context, event: Event) -> Result<Adjudicated, String> {
-        self.harness
-            .adjudicate(event)
-            .await
-            .map_err(|e| e.to_string())
-    }
+#[tonic::async_trait]
+impl<H: Harness + 'static> HarnessService for HarnessGrpcService<H> {
+    async fn adjudicates(
+        &self,
+        request: Request<pb::AdjudicatesRequest>,
+    ) -> Result<Response<pb::AdjudicatesResponse>, Status> {
+        let req = request.into_inner();
 
-    async fn health(self, _: context::Context) -> bool {
-        true
+        let mut out = Vec::with_capacity(req.events.len());
+        for pb_event in &req.events {
+            let event = Event::try_from(pb_event)
+                .map_err(|e| Status::invalid_argument(format!("invalid event: {e}")))?;
+
+            let source_event_id = event.event_id.clone();
+            let source_trajectory_id = event.trajectory_id.clone();
+            let source_agent_id = event.agent.id.clone();
+
+            // Kept only when something will scan it: the payload can carry a
+            // whole file or a shell command's output, so an unconditional clone
+            // would double the ingest cost of every event to serve a feature
+            // that is off by default.
+            let to_scan = self.scans.is_some().then(|| event.clone());
+
+            let adjudicated = self
+                .harness
+                .adjudicate(event)
+                .await
+                .map_err(|e| Status::internal(e.to_string()))?;
+
+            // After the verdict, and only once the engine has persisted the
+            // event — a transcript scan reads the run back out of the store,
+            // and an event scan writes a row keyed by an event that must
+            // already exist. Dispatch is fire-and-forget, so this does not
+            // delay the response.
+            if let (Some(scans), Some(event)) = (self.scans.as_ref(), to_scan) {
+                scans.dispatch(event);
+            }
+
+            out.push(pb::Event::from(AdjudicatedEvent {
+                adjudicated: &adjudicated,
+                source_event_id: &source_event_id,
+                source_trajectory_id: &source_trajectory_id,
+                source_agent_id: &source_agent_id,
+            }));
+        }
+
+        Ok(Response::new(pb::AdjudicatesResponse { events: out }))
     }
 }
 
-/// Spawn a tarpc server listening on a Unix socket.
-pub async fn serve<H>(harness: H, socket_path: &Path) -> Result<()>
+/// Build the tonic service for `harness`, with this transport's message-size
+/// limits applied.
+///
+/// Exposed separately from [`serve`] so a caller that owns the listener — the
+/// unified `sondera serve`, which puts this and the console on one port — adds
+/// it to its own router instead of getting a server built around it.
+pub fn grpc_service<H>(harness: Arc<H>) -> HarnessServiceServer<HarnessGrpcService<H>>
 where
     H: Harness + 'static,
 {
-    // Remove existing socket file if present.
-    if socket_path.exists() {
-        std::fs::remove_file(socket_path)?;
-    }
-
-    // Ensure parent directory exists.
-    if let Some(parent) = socket_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let mut listener = tarpc::serde_transport::unix::listen(socket_path, Json::default).await?;
-    tracing::info!("Harness server listening on {:?}", socket_path);
-
-    let server = HarnessServer::new(Arc::new(harness));
-
-    // 64 MB — generous enough for large Cedar contexts/policies,
-    // bounded enough to prevent OOM from malformed messages.
-    listener.config_mut().max_frame_length(64 * 1024 * 1024);
-    while let Some(accept_result) = listener.next().await {
-        match accept_result {
-            Ok(transport) => {
-                let server = server.clone();
-                tokio::spawn(async move {
-                    let channel = BaseChannel::with_defaults(transport);
-                    channel
-                        .execute(server.serve())
-                        .for_each(|response| async move {
-                            tokio::spawn(response);
-                        })
-                        .await;
-                });
-            }
-            Err(e) => {
-                tracing::error!("Error accepting connection: {}", e);
-            }
-        }
-    }
-
-    Ok(())
+    wrap(HarnessGrpcService::new(harness))
 }
 
-/// tarpc client for connecting to a harness server.
-#[derive(Clone)]
-pub struct HarnessClient {
-    inner: HarnessServiceClient,
+/// [`grpc_service`], for a service the caller has already configured — with
+/// [`HarnessGrpcService::with_scans`], say.
+pub fn wrap<H>(service: HarnessGrpcService<H>) -> HarnessServiceServer<HarnessGrpcService<H>>
+where
+    H: Harness + 'static,
+{
+    HarnessServiceServer::new(service)
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES)
 }
 
-impl HarnessClient {
-    /// Connect to a harness server at the given Unix socket path.
-    pub async fn connect(socket_path: &Path) -> Result<Self> {
-        let transport = tarpc::serde_transport::unix::connect(socket_path, Json::default).await?;
-        let client = HarnessServiceClient::new(client::Config::default(), transport).spawn();
-        Ok(Self { inner: client })
-    }
-
-    /// Connect to the default socket path.
-    pub async fn connect_default() -> Result<Self> {
-        Self::connect(&default_socket_path()).await
-    }
-
-    /// Health check.
-    pub async fn health(&self) -> Result<bool> {
-        self.inner
-            .health(context::current())
-            .await
-            .map_err(|e| anyhow::anyhow!("RPC error: {}", e))
-    }
-}
-
-impl Harness for HarnessClient {
-    fn adjudicate(
-        &self,
-        event: Event,
-    ) -> impl std::future::Future<Output = Result<Adjudicated>> + Send {
-        let inner = self.inner.clone();
-        async move {
-            let mut ctx = context::current();
-            ctx.deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
-            inner
-                .adjudicate(ctx, event)
-                .await
-                .map_err(|e| anyhow::anyhow!("RPC error: {}", e))?
-                .map_err(|e| anyhow::anyhow!("Server error: {}", e))
-        }
-    }
+/// Serve the given [`Harness`] over gRPC on `addr` until the process exits.
+pub async fn serve<H>(harness: H, addr: SocketAddr) -> Result<(), tonic::transport::Error>
+where
+    H: Harness + 'static,
+{
+    tracing::info!("Harness gRPC server listening on {addr}");
+    tonic::transport::Server::builder()
+        .add_service(grpc_service(Arc::new(harness)))
+        .serve(addr)
+        .await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Agent, Control, Decision, Started, TrajectoryEvent};
-    /// A mock harness for testing.
+    use crate::client::HarnessGrpcClient;
+    use crate::types::{
+        Adjudicated, Agent, Decision, Event, HarnessError, Observation, Thought, TrajectoryEvent,
+    };
+
+    /// A harness that allows everything, for transport round-trip testing.
     struct MockHarness;
 
     impl Harness for MockHarness {
-        async fn adjudicate(&self, _event: Event) -> Result<Adjudicated> {
+        async fn adjudicate(&self, _event: Event) -> Result<Adjudicated, HarnessError> {
             Ok(Adjudicated::allow())
         }
     }
 
-    #[tokio::test]
-    async fn test_client_server_roundtrip() {
-        let socket_path =
-            std::env::temp_dir().join(format!("sondera-test-{}.sock", uuid::Uuid::new_v4()));
+    fn test_agent() -> Agent {
+        Agent {
+            id: "test-agent".to_string(),
+            provider: "test".to_string(),
+            platform: String::new(),
+        }
+    }
 
-        // Start server in background.
-        let server_socket = socket_path.clone();
-        let server_handle = tokio::spawn(async move {
-            serve(MockHarness, &server_socket).await.unwrap();
+    #[tokio::test]
+    async fn grpc_client_server_roundtrip() {
+        // Discover a free port, then bind the server to it.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+
+        let server = tokio::spawn(async move {
+            serve(MockHarness, addr).await.unwrap();
         });
 
-        // Give server time to start.
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        // Give the server a moment to start listening.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
-        // Connect client.
-        let client = HarnessClient::connect(&socket_path).await.unwrap();
+        let client = HarnessGrpcClient::connect(format!("http://{addr}"))
+            .await
+            .expect("connect");
 
-        // Test health check.
-        assert!(client.health().await.unwrap());
-
-        // Test adjudicate.
-        let agent = Agent {
-            id: "test-agent".to_string(),
-            provider_id: "test".to_string(),
-        };
         let event = Event::new(
-            agent,
+            test_agent(),
             "test-trajectory",
-            TrajectoryEvent::Control(Control::Started(Started::new("test-agent"))),
+            TrajectoryEvent::Observation(Observation::Thought(Thought::new("hello"))),
         );
-        let result = client.adjudicate(event).await.unwrap();
+        let result = client.adjudicate(event).await.expect("adjudicate");
         assert_eq!(result.decision, Decision::Allow);
 
-        // Cleanup.
-        server_handle.abort();
-        let _ = std::fs::remove_file(&socket_path);
+        server.abort();
     }
 }

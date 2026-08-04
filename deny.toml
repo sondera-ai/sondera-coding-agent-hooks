@@ -30,12 +30,12 @@ ignore = true
 ignore = [
     # Transitive via yara-x -> bincode (unmaintained, no fix available)
     "RUSTSEC-2025-0141",
-    # Transitive via turso_core -> paste (unmaintained, no fix available)
-    "RUSTSEC-2024-0436",
     # Transitive via yara-x -> rsa (timing side-channel, no fix available)
     "RUSTSEC-2023-0071",
-    # Transitive via turbomcp-transport -> rustls-pemfile (unmaintained, no fix available)
-    "RUSTSEC-2025-0134",
+    # Transitive via yara-x -> wasmtime 43. YARA-X uses one process-wide rules
+    # engine here, which the advisory identifies as unaffected; no compatible
+    # patched Wasmtime release exists in YARA-X's current dependency range.
+    "RUSTSEC-2026-0222",
 ]
 
 [sources]

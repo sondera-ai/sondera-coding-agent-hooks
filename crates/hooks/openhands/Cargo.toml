@@ -1,0 +1,23 @@
+[package]
+name = "sondera-openhands"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Sondera Team"]
+description = "OpenHands hooks implementation for Sondera Agentic Security Platform"
+
+[dependencies]
+sondera-harness-client = { workspace = true }
+sondera-hooks = { workspace = true }
+sondera-types = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

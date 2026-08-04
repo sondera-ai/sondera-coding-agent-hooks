@@ -1,0 +1,24 @@
+[package]
+name = "sondera-opencode"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Sondera Team"]
+description = "OpenCode plugin adapter for Sondera Agentic Security Platform"
+
+[dependencies]
+sondera-harness-client = { workspace = true }
+sondera-hooks = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+chrono = { workspace = true }
+dirs = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[lints]
+workspace = true

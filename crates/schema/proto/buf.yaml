@@ -1,0 +1,16 @@
+version: v2
+modules:
+  - path: .
+deps:
+  - buf.build/googleapis/googleapis
+lint:
+  use:
+    - STANDARD
+  except:
+    # AIP standard methods return the resource directly (Create/Get/Update -> Resource,
+    # Delete -> Empty). These buf rules conflict with that pattern.
+    - RPC_RESPONSE_STANDARD_NAME
+    - RPC_REQUEST_RESPONSE_UNIQUE
+breaking:
+  use:
+    - FILE
