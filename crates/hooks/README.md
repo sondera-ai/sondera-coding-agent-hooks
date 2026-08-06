@@ -178,6 +178,69 @@ Remaining gaps:
   a `WebFetch` with an empty URL matches no `url_parse` condition. They stay
   generic `ToolCall`s, so no policy governs what an agent searches for.
 
+## Policy enforcement points
+
+The harness vocabulary is three decisions — **Allow**, **Deny**, **Escalate**
+(`crates/types/src/policy.rs`). Everything below is an adapter's projection of
+those three onto its host's response vocabulary, and a host that lacks a verb
+gets the nearest safe one.
+
+**Hook groups** — where in the agent loop an adjudication lands:
+
+| Group | Moment | Typical host events |
+|---|---|---|
+| **PreModel** | Before content reaches the model | `UserPromptSubmit`, `BeforeAgent`/`BeforeModel`, `pre_llm_call`, `beforeSubmitPrompt` |
+| **PostModel** | After the model produces output, or at turn end | `AfterModel`/`AfterAgent`, `Stop` |
+| **PreTool** | Before a tool executes — the preventive gate | `PreToolUse`, `BeforeTool`, `tool.execute.before`, `PermissionRequest` |
+| **PostTool** | After execution, before the agent consumes the result | `PostToolUse`, `AfterTool`, `tool.execute.after` |
+
+**Capabilities** — what the host lets the adapter do with a decision:
+
+| Capability | Meaning |
+|---|---|
+| **Block** | A deny is honored before (PreTool/PreModel) or after (PostTool: blocks the agent's continuation — the side effect already happened) the action. Blockable gates fail closed when the harness is unreachable, except where a cell notes a degrade-open path. |
+| **Ask** | `Escalate` surfaces as the host's own approval UI (`permissionDecision: "ask"` or equivalent). |
+| **Steer** | The adapter can inject context, a system message, or a tool filter the model sees. |
+| **Redact** | The adapter can replace the tool output the model reads. |
+| **Terminate** | The adapter can stop the agent loop (`continue: false`). |
+| **Observe** | The event is adjudicated and recorded, but the host ignores any block; degrades open. |
+
+**Full matrix** — host event names per cell; `—` means the group is not wired:
+
+| Adapter | PreModel | PostModel | PreTool | PostTool |
+|---|---|---|---|---|
+| `claude` | `UserPromptSubmit`: **Block** (Escalate→deny); `SessionStart`: **Steer** | `Stop`: **Observe** — Claude treats Stop blocks as continue signals | `PreToolUse`: **Block + Ask**; `PermissionRequest`: **Block** (Escalate→deny; interrupts on the degraded path only) | `PostToolUse`: **Block + Redact** |
+| `vscode` | `UserPromptSubmit`: **Block + Terminate** (`continue: false`) **+ Steer**; `SessionStart`: **Steer** | `Stop`: **Observe** | `PreToolUse`: **Block + Ask** | `PostToolUse`: **Block + Steer** |
+| `gemini` | `BeforeAgent`/`BeforeModel`: **Block** (Escalate→deny); **Steer** (context; `BeforeToolSelection` tool filter) | `AfterModel`/`AfterAgent`: **Block** (deny returns as retry feedback) | `BeforeTool`: **Block** (Escalate→deny) | `AfterTool`: **Steer** only — the hook has no `decision` field |
+| `antigravity` | `PreInvocation`: **Observe** (no-op) | `PostInvocation`/`Stop`: **Observe** | `PreToolUse`: **Block + Ask** | `PostToolUse`: **Observe** |
+| `copilot` | `UserPromptSubmitted`: **Observe**; `UserPromptTransformed`: **Block** (via prompt replace) | `AgentStop`: **Observe** | `PreToolUse`: **Block** (Escalate→deny; can modify args); `PermissionRequest`: **Block** | `PostToolUse`: **Observe** |
+| `cursor` | `beforeSubmitPrompt`: **Block** (Escalate→**allow** + user message) | `stop`: **Observe** | `beforeShellExecution`/`beforeMCPExecution`: **Block + Ask**; `beforeReadFile`/`preToolUse`: **Block** (Escalate→deny) | `afterShellExecution`/`postToolUse`: **Observe** |
+| `codex` | `UserPromptSubmit`: **Block** | `Stop`: **Observe** | `PreToolUse` (`Bash` only): **Block + Ask**; `PermissionRequest` (`*` matcher): **Block** | `PostToolUse`: **Block** (degrades open on harness error) |
+| `hermes` | `pre_llm_call`: **Steer** only — Hermes shell hooks cannot hard-block model calls | `post_llm_call`/transform hooks: **Observe** (host does not consume replacements) | `pre_tool_call`: **Block** | `post_tool_call`: **Observe** |
+| `opencode` | — | — | `tool.execute.before`: **Block + Ask** (native `Escalate`); `permission.ask`: **Block** | `tool.execute.after`: **Observe** (decision returned; non-blocking criticality) |
+| `openhands` | `user_prompt_submit`: **Block + Steer** | `stop`: **Block** — policy can force continued work | `pre_tool_use`: **Block + Steer** (Escalate→deny) | `post_tool_use`: **Observe** |
+
+What the matrix compresses:
+
+- **Escalate degrades toward deny, with one exception.** A host without "ask"
+  maps `Escalate` to a deny carrying a requires-review message — the safe
+  direction. The exception is Cursor's `beforeSubmitPrompt`, where escalate
+  becomes an *allow* with a user message: the one cell where an `Escalate`
+  verdict stops nothing.
+- **PostTool Block is not undo.** The side effect already happened; blocking
+  stops the agent's continuation. Only `claude` can additionally redact,
+  replacing the tool output the model reads.
+- **Terminate barely exists.** `continue: false` is in the `claude`, `vscode`,
+  and `gemini` response types, but as an adjudication outcome it is reachable
+  only on the VS Code prompt gate. `claude` uses it on degraded lifecycle paths
+  (`TaskCompleted`/`TeammateIdle`); `gemini`'s `stop()` is defined but not
+  driven by a policy decision. `openhands`' `stop` is the inverse: policy can
+  forbid *stopping*.
+- **Lifecycle events sit outside these four groups.** `claude` is the outlier,
+  with fail-closed enforcement on `PreCompact`, `ConfigChange`, `SubagentStop`,
+  `TaskCompleted`, and `TeammateIdle`; its `src/event.rs` `HOOK_MATRIX` is the
+  authoritative per-event record, including deliberately unsupported events.
+
 ## Claude degraded-path posture
 
 Two independent timeouts bound a Claude hook:
