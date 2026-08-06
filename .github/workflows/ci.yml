@@ -230,6 +230,8 @@ jobs:
           cp "target/${{ matrix.target }}/release/sondera" "$bundle/"
           cp -R .sondera "$bundle/"
           cp README.md LICENSE "$bundle/"
+          # README's links now resolve into docs/; ship it so they are not dead.
+          cp -R docs "$bundle/"
           tar -czvf "$bundle.tar.gz" "$bundle"
 
       - name: Upload artifacts

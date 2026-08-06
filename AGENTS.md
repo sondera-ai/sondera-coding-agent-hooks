@@ -104,15 +104,6 @@ Three rules that are easy to get wrong:
 
 Do not paper over these in docs; fix or report them.
 
-- **`examples/` is not committed at all.** The release squash removed the tracked
-  corpus (the Copilot CLI fixture set, the standalone `.cedar` samples —
-  `git log --diff-filter=D -- examples` finds them); nothing under
-  `examples/` is in `HEAD`, and there is no `examples/README.md` for this file or
-  `README.md` §6 to point at. The credential-bearing scenarios (planted `.env`
-  files, private keys, the vulnerable Agent Skill set) were always meant to stay
-  local — the runnable half is now local too, so §6 sends a reader to a
-  directory a fresh clone does not have. Restore a committed fixture *with* its
-  README, or drop the section; do not restore only the pointer.
 - **`lol-forbid-base64-encode-files` was drafted and never enabled.** It sat
   commented out in the deleted `lotl.cedar` (recover it with
   `git log --diff-filter=D -p -- .sondera/policies/cedar/lotl.cedar`), so
