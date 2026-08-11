@@ -174,7 +174,7 @@ jobs:
       # the `[graph]` section deny.toml uses and failed to parse the config at
       # all. Pin the tool version too, so the scanner cannot drift with the action.
       - name: Install cargo-deny
-        uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60  # v2.85.7
+        uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad  # v2.85.10
         with:
           tool: cargo-deny@0.19.0
 
