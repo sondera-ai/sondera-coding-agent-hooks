@@ -36,6 +36,9 @@ ignore = [
     # engine here, which the advisory identifies as unaffected; no compatible
     # patched Wasmtime release exists in YARA-X's current dependency range.
     "RUSTSEC-2026-0222",
+    # Transitive via yara-x -> wasmtime. The vulnerable filesystem implementation
+    # is in wasmtime-wasi, which is not present in the resolved dependency graph.
+    "RUSTSEC-2026-0269",
 ]
 
 [sources]
