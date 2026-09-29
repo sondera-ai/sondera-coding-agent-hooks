@@ -39,6 +39,11 @@ ignore = [
     # Transitive via yara-x -> wasmtime. The vulnerable filesystem implementation
     # is in wasmtime-wasi, which is not present in the resolved dependency graph.
     "RUSTSEC-2026-0269",
+    # Transitive via yara-x -> wasmtime. The affected component::Val API requires
+    # component-model, which is disabled in the resolved workspace graph,
+    # including all workspace features and targets. YARA-X uses core Wasm APIs.
+    # Reassess if Wasmtime features change; remove once YARA-X uses a patched release.
+    "RUSTSEC-2026-0316",
 ]
 
 [sources]
