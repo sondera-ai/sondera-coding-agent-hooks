@@ -44,6 +44,13 @@ ignore = [
     # including all workspace features and targets. YARA-X uses core Wasm APIs.
     # Reassess if Wasmtime features change; remove once YARA-X uses a patched release.
     "RUSTSEC-2026-0316",
+    # Transitive via yara-x -> wasmtime. The affected async component callbacks
+    # require component-model-async, which is disabled in the resolved workspace
+    # graph, including all workspace features and targets. YARA-X uses core Wasm.
+    # Upstream explicitly identifies disabling this feature as a workaround:
+    # https://github.com/bytecodealliance/wasmtime/security/advisories/GHSA-32h6-97mm-8q3c
+    # Reassess if Wasmtime features change; remove once YARA-X uses a patched release.
+    "RUSTSEC-2026-0327",
 ]
 
 [sources]
