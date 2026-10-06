@@ -17,6 +17,9 @@ use rig::completion::{
 #[async_trait]
 pub trait DynCompletionModel: Send + Sync {
     /// Run a completion request, discarding the provider-specific raw response.
+    // CONTEXT: async-trait adds #[must_use] to this method, whose boxed future
+    // is already must-use. Allow only the redundant attribute generated here.
+    #[allow(clippy::double_must_use)]
     async fn completion(
         &self,
         request: CompletionRequest,
