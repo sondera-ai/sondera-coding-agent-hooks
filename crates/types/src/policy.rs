@@ -247,6 +247,9 @@ pub struct CompiledPolicySet {
 #[async_trait::async_trait]
 pub trait PolicyStore: Send + Sync {
     /// Compile the effective Cedar policies and mode for the given query context.
+    // CONTEXT: async-trait adds #[must_use] to this method, whose boxed future
+    // is already must-use. Allow only the redundant attribute generated here.
+    #[allow(clippy::double_must_use)]
     async fn compile_policy_set(
         &self,
         query: &PolicyStoreQuery,

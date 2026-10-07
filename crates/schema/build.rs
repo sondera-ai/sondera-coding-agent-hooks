@@ -33,9 +33,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // time even though `buf lint` resolves them from its own module deps.
     let googleapis_root = PathBuf::from("googleapis");
 
+    // CONTEXT: generated service traits use async-trait, which adds redundant
+    // #[must_use] attributes to methods returning already-must-use futures.
     tonic_prost_build::configure()
         .build_server(true)
         .build_client(true)
+        .trait_attribute(".", "#[allow(clippy::double_must_use)]")
         .protoc_arg(format!("-I{}", include_dir.display()))
         .compile_protos(&sondera_protos, &[proto_root, googleapis_root])?;
 
