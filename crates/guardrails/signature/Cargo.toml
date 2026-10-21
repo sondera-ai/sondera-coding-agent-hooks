@@ -8,7 +8,7 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-yara-x = "1"
+yara-x = "1.22"
 include_dir = "0.7"
 tracing = "0.1"
 serde = { version = "1", features = ["derive"] }
