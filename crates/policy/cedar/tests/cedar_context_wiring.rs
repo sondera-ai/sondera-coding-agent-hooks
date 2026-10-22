@@ -167,6 +167,75 @@ async fn shell_command_context_reaches_the_structural_parse_policy() {
     );
 }
 
+/// Base64 and OpenSSL base64 invocations must be denied by the structured
+/// command policy, while prose mentioning the tool and help queries remain
+/// allowed. This also pins that wrappers and pipelines reach the parsed
+/// command programs used by the policy.
+#[tokio::test]
+async fn shell_command_context_reaches_base64_staging_policy() {
+    let dangerous = [
+        ("base64 secrets.txt", "base64 file argument"),
+        ("cat secrets.txt | base64", "base64 pipeline"),
+        (
+            "openssl enc -base64 -in secrets.txt",
+            "openssl enc base64 mode",
+        ),
+        (
+            "openssl base64 -in secrets.txt",
+            "openssl base64 subcommand",
+        ),
+    ];
+
+    for (command, label) in dangerous {
+        let (harness, _temp) = load().await;
+        let event = Event::new(
+            test_agent(),
+            format!("traj-shell-base64-{label}"),
+            TrajectoryEvent::Action(Action::ShellCommand(ShellCommand::new(command))),
+        );
+        let out = harness
+            .adjudicate(event)
+            .await
+            .expect("adjudicate base64 staging command");
+
+        assert_eq!(out.reason, None, "{label}: context must typecheck cleanly");
+        assert_eq!(out.decision, Decision::Deny, "{label}: {out:?}");
+        assert!(
+            out.metadata
+                .iter()
+                .any(|m| m.policy_id.as_deref() == Some("lol-forbid-base64-encode-files")),
+            "{label}: expected the structured base64 policy to fire; got {:?}",
+            out.metadata
+        );
+    }
+
+    for (command, label) in [
+        ("echo 'base64 secrets.txt'", "prose mentioning base64"),
+        ("base64 --help", "base64 help query"),
+    ] {
+        let (harness, _temp) = load().await;
+        let event = Event::new(
+            test_agent(),
+            format!("traj-shell-base64-near-miss-{label}"),
+            TrajectoryEvent::Action(Action::ShellCommand(ShellCommand::new(command))),
+        );
+        let out = harness
+            .adjudicate(event)
+            .await
+            .expect("adjudicate base64 near miss");
+
+        assert_eq!(out.reason, None, "{label}: context must typecheck cleanly");
+        assert_eq!(out.decision, Decision::Allow, "{label}: {out:?}");
+        assert!(
+            !out.metadata
+                .iter()
+                .any(|m| m.policy_id.as_deref() == Some("lol-forbid-base64-encode-files")),
+            "{label}: the base64 policy must not fire; got {:?}",
+            out.metadata
+        );
+    }
+}
+
 /// Reading an SSH private key must be denied by `lol-forbid-read-ssh-private-keys`,
 /// which matches on `context.path_normalized`. A Deny attributed to that policy
 /// proves the required normalized-path field was emitted.

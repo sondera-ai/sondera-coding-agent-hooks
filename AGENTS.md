@@ -100,17 +100,5 @@ Three rules that are easy to get wrong:
   a stale `[`Type`]` reference fails `cargo doc`. CI runs it workspace-wide; when
   you rename or move a public item, check that one crate before you hand off.
 
-## Known gaps
-
-Do not paper over these in docs; fix or report them.
-
-- **`lol-forbid-base64-encode-files` was drafted and never enabled.** It sat
-  commented out in the deleted `lotl.cedar` (recover it with
-  `git log --diff-filter=D -p -- .sondera/policies/cedar/lotl.cedar`), so
-  base64 / `openssl enc` data staging is currently ungoverned on the shell
-  surface. It is the one control the banner deletion removed a draft of: either
-  author it properly through `.agents/skills/autoformalize/SKILL.md` — the draft
-  never had a behavioural check — or record that the gap is accepted.
-
 When you write a user-facing remediation string, name a command that exists.
 `sondera` has exactly four subcommands: `hook`, `serve`, `mcp`, and `tui`.
