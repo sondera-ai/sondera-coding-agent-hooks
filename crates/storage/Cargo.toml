@@ -27,7 +27,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["preserve_order"] }
 tokio = { workspace = true, features = ["rt", "sync", "time"] }
 tracing = { workspace = true }
-turso = { version = "0.8.0-pre.2", default-features = false, features = ["mimalloc"] }
+turso = { version = "0.8.3", default-features = false, features = ["mimalloc"] }
 cedar-policy = { workspace = true, optional = true }
 
 [dev-dependencies]
