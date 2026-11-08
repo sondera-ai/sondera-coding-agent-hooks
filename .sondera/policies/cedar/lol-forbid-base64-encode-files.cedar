@@ -7,6 +7,13 @@ forbid (
 ) when {
     context has parse &&
     context.parse.ok &&
+    (if context.parse has command_modes then
+        context.parse.command_modes.containsAny([
+            "base64:encode", "openssl:base64", "openssl:enc-base64"
+        ])
+    else
+    // Legacy contexts lack invocation identity. Retain their historical
+    // behavior; modern producers use command_modes and cannot mix flags.
     (
         (
             context.parse.programs.contains("base64") &&
@@ -35,5 +42,5 @@ forbid (
                 )
             )
         )
-    )
+    ))
 };
