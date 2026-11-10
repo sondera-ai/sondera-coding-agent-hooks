@@ -48,12 +48,14 @@ context), **redact** (replace tool output), **terminate** (stop the loop),
 | Cursor | block | *observe* | block · ask | *observe* |
 | Codex | block | *observe* | block · ask | block |
 | Hermes | steer | *observe* | block | *observe* |
-| OpenCode | — | — | block · ask | *observe* |
+| OpenCode* | — | — | block · ask | *observe* |
 | OpenHands | block · steer | block | block · steer | *observe* |
 
 Terms, the per-event matrix behind each cell, and the caveats it compresses are
 defined in
 [crates/hooks/README.md](https://github.com/sondera-ai/sondera-coding-agent-hooks/blob/main/crates/hooks/README.md).
+
+> \* Supports OpenCode V2 and V1 ≥1.18.29
 
 ## Quick start
 
