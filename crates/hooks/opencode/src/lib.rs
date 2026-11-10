@@ -14,7 +14,7 @@
 //! resolves to a degraded response rather than a bare non-zero exit. Preventive
 //! events fail closed.
 //!
-//! Reference: <https://opencode.ai/docs/plugins/>
+//! Reference: <https://opencode.ai/docs/build/plugins/migrate-v1#support-v1-and-v2-from-one-package>
 
 pub mod sidecar;
 
@@ -242,54 +242,134 @@ const PERMISSION_ASK = __PERMISSION_ASK__
 const TOOL_BEFORE = __TOOL_BEFORE__
 const TOOL_AFTER = __TOOL_AFTER__
 const EVENT = __EVENT__
-const DIRECT_EVENT_TYPES = new Set(["tool.execute.before", "tool.execute.after"])
+const DIRECT_EVENT_TYPES = new Set([
+  "tool.execute.before",
+  "tool.execute.after",
+  "session.tool.called",
+  "session.tool.success",
+  "session.tool.failed",
+]);
 
-async function invoke(command, payload) {
-  const result = await $`${{ raw: command }}`
-    .stdin(JSON.stringify(payload))
-    .quiet()
-    .nothrow()
-  let response = {}
+const invoke = async (command, payload) => {
+  const result =
+    await $`${{ raw: command }} < ${Buffer.from(JSON.stringify(payload))}`
+      .quiet()
+      .nothrow();
+  let response = {};
   try {
-    response = JSON.parse(result.stdout.toString() || "{}")
+    response = JSON.parse(result.stdout.toString() || "{}");
   } catch {
-    response = {}
+    response = {};
   }
   if (result.exitCode !== 0 && response.decision !== "deny") {
     response = {
       decision: "deny",
       reason: result.stderr.toString().trim() || "Sondera hook failed closed",
-    }
+    };
   }
-  return response
-}
+  return response;
+};
 
-export const Sondera = async () => ({
-  "chat.message": async (input, output) => {
-    const content = output.parts
-      .filter((part) => part.type === "text")
-      .map((part) => part.text)
-      .join("")
-    await invoke(CHAT_MESSAGE, { ...input, ...output, content })
+export default {
+  id: "sondera",
+
+  async server() {
+    return {
+      "chat.message": async (input, output) => {
+        const content = output.parts
+          .filter((part) => part.type === "text")
+          .map((part) => part.text)
+          .join("");
+        await invoke(CHAT_MESSAGE, { ...input, ...output, content });
+      },
+      "permission.ask": async (input, output) => {
+        const response = await invoke(PERMISSION_ASK, { ...input, ...output });
+        if (response.decision === "deny") output.status = "deny";
+      },
+      "tool.execute.before": async (input, output) => {
+        const response = await invoke(TOOL_BEFORE, {
+          ...input,
+          ...output,
+          args: output.args,
+        });
+        if (response.decision === "deny") {
+          throw new Error(
+            response.reason || "Tool execution blocked by Sondera policy"
+          );
+        }
+      },
+      "tool.execute.after": async (input, output) => {
+        await invoke(TOOL_AFTER, { ...input, ...output });
+      },
+      event: async ({ event }) => {
+        if (DIRECT_EVENT_TYPES.has(event.type)) return;
+        await invoke(EVENT, {
+          kind: event.type,
+          payload: event.properties ?? event,
+        });
+      },
+    };
   },
-  "permission.ask": async (input, output) => {
-    const response = await invoke(PERMISSION_ASK, { ...input, ...output })
-    if (response.decision === "deny") output.status = "deny"
+
+  async setup(ctx) {
+    await ctx.tool.hook("execute.before", async (event) => {
+      const response = await invoke(TOOL_BEFORE, {
+        ...event,
+        args: event.input,
+      });
+      if (response.decision === "deny") {
+        throw new Error(
+          response.reason || "Tool execution blocked by Sondera policy"
+        );
+      }
+    });
+    await ctx.permission.hook("evaluate", async (event) => {
+      const response = await invoke(PERMISSION_ASK, {
+        ...event,
+        callId: event.source?.id,
+      });
+      if (response.decision === "deny") {
+        event.effect = "deny";
+        event.message =
+          response.reason || "Permission denied by Sondera policy";
+      }
+    });
+    await ctx.tool.hook("execute.after", async (event) => {
+      const content = event.result?.content;
+      const output =
+        typeof content === "string"
+          ? content
+          : content
+              ?.filter((part) => part.type === "text")
+              .map((part) => part.text)
+              .join("");
+      await invoke(TOOL_AFTER, {
+        ...event,
+        args: event.input,
+        output,
+        error: event.error?.message,
+      });
+    });
+    await ctx.session.hook("prompt", async (event) => {
+      await invoke(CHAT_MESSAGE, { ...event, content: event.prompt.text });
+    });
+
+    const controller = new AbortController();
+    void (async () => {
+      for await (const event of ctx.event.subscribe({
+        signal: controller.signal,
+      })) {
+        if (controller.signal.aborted) break;
+        if (DIRECT_EVENT_TYPES.has(event.type)) continue;
+        await invoke(EVENT, { kind: event.type, payload: event.data });
+      }
+    })().catch((error) => {
+      if (!controller.signal.aborted)
+        console.error("Sondera event subscription failed", error);
+    });
+    return () => controller.abort();
   },
-  "tool.execute.before": async (input, output) => {
-    const response = await invoke(TOOL_BEFORE, { ...input, ...output, args: output.args })
-    if (response.decision === "deny") {
-      throw new Error(response.reason || "Tool execution blocked by Sondera policy")
-    }
-  },
-  "tool.execute.after": async (input, output) => {
-    await invoke(TOOL_AFTER, { ...input, ...output })
-  },
-  event: async ({ event }) => {
-    if (DIRECT_EVENT_TYPES.has(event.type)) return
-    await invoke(EVENT, { kind: event.type, payload: event.properties ?? event })
-  },
-})
+};
 "#;
 
 fn read_json_object(path: &Path) -> Result<serde_json::Map<String, Value>> {
