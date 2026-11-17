@@ -56,10 +56,9 @@ use cedar_policy::{
 };
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    AnnotateAble, GetPromptRequestParams, GetPromptResult, Implementation, ListPromptsResult,
-    ListResourcesResult, PaginatedRequestParams, PromptMessage, PromptMessageRole, RawResource,
-    ReadResourceRequestParams, ReadResourceResult, ResourceContents, ServerCapabilities,
-    ServerInfo,
+    GetPromptResult, Implementation, ListResourcesResult, PaginatedRequestParams, PromptMessage,
+    ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
+    ResourceContents, Role, ServerCapabilities, ServerConfig,
 };
 use rmcp::service::RequestContext;
 use rmcp::{
@@ -1699,7 +1698,7 @@ impl CedarMcpServer {
         Parameters(AutoformalizeArgs { intent }): Parameters<AutoformalizeArgs>,
     ) -> Result<GetPromptResult, McpError> {
         Ok(GetPromptResult::new(vec![PromptMessage::new_text(
-            PromptMessageRole::User,
+            Role::User,
             autoformalize_prompt(&intent),
         )])
         .with_description("Autoformalization guidance for the Sondera OSS harness Cedar engine"))
@@ -1777,8 +1776,8 @@ fn resource_body(uri: &str) -> Option<&'static str> {
 #[tool_handler]
 #[prompt_handler]
 impl ServerHandler for CedarMcpServer {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(
             ServerCapabilities::builder()
                 .enable_tools()
                 .enable_prompts()
@@ -1818,17 +1817,15 @@ impl ServerHandler for CedarMcpServer {
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, McpError> {
         Ok(ListResourcesResult::with_all_items(vec![
-            RawResource::new(
+            Resource::new(
                 AUTHORING_GUIDE_URI,
                 "How to author Cedar for the Sondera harness (read this first)",
-            )
-            .no_annotation(),
-            RawResource::new(HARNESS_SCHEMA_URI, "Sondera harness Cedar schema").no_annotation(),
-            RawResource::new(
+            ),
+            Resource::new(HARNESS_SCHEMA_URI, "Sondera harness Cedar schema"),
+            Resource::new(
                 HARNESS_BASE_POLICIES_URI,
                 "Sondera harness default-permit root (query_baseline_coverage has the forbids)",
-            )
-            .no_annotation(),
+            ),
         ]))
     }
 
@@ -1836,17 +1833,14 @@ impl ServerHandler for CedarMcpServer {
         &self,
         request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> Result<ReadResourceResult, McpError> {
+    ) -> Result<ReadResourceResponse, McpError> {
         let Some(body) = resource_body(request.uri.as_str()) else {
             return Err(McpError::resource_not_found(
                 format!("Unknown resource: {}", request.uri),
                 None,
             ));
         };
-        Ok(ReadResourceResult::new(vec![ResourceContents::text(
-            body,
-            &request.uri,
-        )]))
+        Ok(ReadResourceResult::new(vec![ResourceContents::text(body, &request.uri)]).into())
     }
 }
 

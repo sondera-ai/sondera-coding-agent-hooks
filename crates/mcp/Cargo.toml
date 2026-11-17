@@ -22,7 +22,7 @@ sondera-console = { workspace = true }
 sondera-schema = { workspace = true }
 sondera-types = { workspace = true }
 cedar-policy = { version = "4" }
-rmcp = { version = "1.8", features = ["server", "macros", "transport-io"] }
+rmcp = { version = "3.10.0", features = ["server", "macros", "transport-io"] }
 schemars = { version = "1" }
 # Only `tokio::sync::RwLock` is used directly; rmcp declares the io
 # features its stdio transport needs.
