@@ -29,6 +29,10 @@ ignore = true
 [advisories]
 unused-ignored-advisory = "deny"
 ignore = [
+    # Chrono is unmaintained with no patched release (https://rustsec.org/advisories/RUSTSEC-2026-0543.html).
+    # Third-party crates still depend on Chrono.
+    # Remove this exception when Chrono is no longer listed in Cargo.lock.
+    "RUSTSEC-2026-0543",
     # Transitive via yara-x -> bincode (unmaintained, no fix available)
     "RUSTSEC-2025-0141",
     # Transitive via yara-x -> rsa (timing side-channel, no fix available)
