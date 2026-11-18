@@ -37,7 +37,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
 # Console projections are tested against events encoded by the real server-side
 # converters, which timestamp them.
-chrono = { workspace = true }
+jiff = { workspace = true }
 
 [lints]
 workspace = true

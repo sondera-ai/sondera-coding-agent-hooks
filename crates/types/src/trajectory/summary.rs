@@ -18,8 +18,8 @@ use super::{
 use crate::error::StoreError;
 use crate::page::Page;
 use crate::policy::Decision;
-use chrono::{DateTime, Utc};
 use futures_core::Stream;
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::future::Future;
@@ -34,7 +34,7 @@ pub struct Trajectory {
     pub id: String,
     /// Bare id of the agent that produced the run.
     pub agent_id: String,
-    pub started_at: Option<DateTime<Utc>>,
+    pub started_at: Option<Timestamp>,
     pub duration_ms: i64,
     /// The run-level verdict: the most severe adjudication recorded on the run.
     pub decision: Option<Decision>,
@@ -48,7 +48,7 @@ pub struct Trajectory {
     /// A one-line description of the run.
     pub summary: String,
     pub status: TrajectoryStatus,
-    pub update_time: Option<DateTime<Utc>>,
+    pub update_time: Option<Timestamp>,
     /// Latest hierarchical transcript digest, projected from the run's `Scanned`
     /// control events. Absent until the scanner has produced one, and only
     /// populated by [`Trajectory::detail`].
@@ -66,7 +66,7 @@ impl Trajectory {
         let started_at = events.first().map(|event| event.timestamp);
         let update_time = events.last().map(|event| event.timestamp);
         let duration_ms = match (started_at, update_time) {
-            (Some(first), Some(last)) => (last - first).num_milliseconds().max(0),
+            (Some(first), Some(last)) => (last - first).as_millis().max(0) as i64,
             _ => 0,
         };
 
@@ -433,7 +433,6 @@ mod tests {
         Terminated,
     };
     use crate::{Actor, Agent, Causality, PolicyMetadata, Thought};
-    use chrono::TimeZone;
 
     fn event_scan_result() -> EventScanResult {
         EventScanResult {
@@ -454,7 +453,7 @@ mod tests {
             event_id: format!("event-{index}"),
             trajectory_id: "run-1".to_string(),
             agent: Agent::new("agent-1", "test", ""),
-            timestamp: Utc.timestamp_millis_opt(index * 1_000).unwrap(),
+            timestamp: Timestamp::from_millisecond(index * 1_000).unwrap(),
             event: payload,
             actor: Actor::agent("agent-1"),
             causality: Causality::default(),

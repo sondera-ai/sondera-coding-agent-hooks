@@ -16,8 +16,8 @@
 //! `trajectory_events.timestamp` is — a constant `+00:00` offset is what makes
 //! lexicographic comparison chronological.
 
-use super::{StoreResult, TrajectoryStore, store_err};
-use chrono::Utc;
+use super::{StoreResult, TrajectoryStore, format_timestamp, store_err};
+use jiff::Timestamp;
 use sondera_types::{
     EventScanResult, ScanReaderWriter, ScanSource, TrajectoryScans, TranscriptDigest,
     TranscriptScan, TranscriptScanResult,
@@ -91,7 +91,7 @@ impl ScanReaderWriter for TrajectoryStore {
                     result.description.clone(),
                     result.confidence,
                     scan_json,
-                    Utc::now().to_rfc3339(),
+                    format_timestamp(Timestamp::now()),
                 ],
             )
             .await
@@ -123,7 +123,7 @@ impl ScanReaderWriter for TrajectoryStore {
                     digest.title.clone(),
                     i64::from(digest.interim),
                     scan_json,
-                    Utc::now().to_rfc3339(),
+                    format_timestamp(Timestamp::now()),
                 ],
             )
             .await
@@ -157,7 +157,7 @@ impl ScanReaderWriter for TrajectoryStore {
                     variant_name(&scan.aggregate_severity),
                     scan.confidence,
                     scan_json,
-                    Utc::now().to_rfc3339(),
+                    format_timestamp(Timestamp::now()),
                 ],
             )
             .await

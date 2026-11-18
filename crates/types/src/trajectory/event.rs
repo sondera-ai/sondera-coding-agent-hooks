@@ -14,7 +14,7 @@ use super::control::{Adjudicated, Control};
 use super::observation::Observation;
 use super::state::State;
 use crate::Agent;
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -47,7 +47,7 @@ pub struct Event {
     /// The agent that generated this event.
     pub agent: Agent,
     /// When this event occurred.
-    pub timestamp: DateTime<Utc>,
+    pub timestamp: Timestamp,
     /// The actual event payload.
     pub event: TrajectoryEvent,
     /// Who triggered this event.
@@ -77,7 +77,7 @@ impl Event {
             event_id: format!("evt-{}", uuid::Uuid::new_v4()),
             trajectory_id: trajectory_id.into(),
             agent,
-            timestamp: Utc::now(),
+            timestamp: Timestamp::now(),
             event,
             actor: Actor::agent(agent_id),
             causality: Causality::default(),
@@ -94,7 +94,7 @@ impl Event {
         self
     }
 
-    pub fn with_timestamp(mut self, timestamp: DateTime<Utc>) -> Self {
+    pub fn with_timestamp(mut self, timestamp: Timestamp) -> Self {
         self.timestamp = timestamp;
         self
     }

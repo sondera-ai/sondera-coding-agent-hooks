@@ -162,7 +162,7 @@ impl From<&EventDetail> for pb::TrajectoryEventDetail {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{TimeZone, Utc};
+    use jiff::Timestamp;
     use sondera_types::{
         Actor, Adjudicated, Agent, Causality, Control, Observation, ShellCommand, Thought,
         TrajectoryStatus,
@@ -172,7 +172,7 @@ mod tests {
         AgentActivity {
             status: AgentStatus::Degraded,
             health_score: 42,
-            last_active_time: Some(Utc.timestamp_millis_opt(1_700_000_000_000).unwrap()),
+            last_active_time: Some(Timestamp::from_millisecond(1_700_000_000_000).unwrap()),
             runs_today: 7,
             deny_rate: 0.58,
             ..Agent::new("a1", "anthropic", "claude-code").into()
@@ -184,7 +184,7 @@ mod tests {
             event_id: id.to_string(),
             trajectory_id: "run-1".to_string(),
             agent: Agent::new("a1", "anthropic", "claude-code"),
-            timestamp: Utc.timestamp_millis_opt(0).unwrap(),
+            timestamp: Timestamp::from_millisecond(0).unwrap(),
             event: payload,
             actor: Actor::agent("a1"),
             causality: Causality::default(),

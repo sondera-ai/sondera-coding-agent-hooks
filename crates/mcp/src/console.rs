@@ -483,7 +483,7 @@ fn trajectory_event(wire: &pb::TrajectoryEvent) -> Result<Value, ConsoleError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{TimeZone, Utc};
+    use jiff::Timestamp;
     use sondera_types::{Actor, Agent, Causality, Control, Event, Observation, Thought};
 
     /// Encode a domain event exactly as the console does, so these tests decode
@@ -493,7 +493,7 @@ mod tests {
             event_id: "e1".to_string(),
             trajectory_id: "run-1".to_string(),
             agent: Agent::new("a1", "anthropic", "claude-code"),
-            timestamp: Utc.timestamp_millis_opt(0).unwrap(),
+            timestamp: Timestamp::from_millisecond(0).unwrap(),
             event: payload,
             actor: Actor::agent("a1"),
             causality: Causality::default(),

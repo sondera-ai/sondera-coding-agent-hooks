@@ -34,7 +34,7 @@ mod trajectory;
 
 use super::file::get_storage_dir;
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use sondera_types::{Event, StoreError};
 use std::path::Path;
 use std::time::Duration;
@@ -42,6 +42,26 @@ use tracing::{debug, warn};
 use turso::{Builder, Connection, Database};
 
 pub(crate) type StoreResult<T> = std::result::Result<T, StoreError>;
+
+/// Preserve the ledger's UTC offset and fractional precision across writers.
+pub(crate) fn format_timestamp(timestamp: Timestamp) -> String {
+    // CONTEXT: existing rows use Chrono's 0/3/6/9 fractional digits and +00:00.
+    // Changing their representation would change SQL ordering and equality.
+    let nanos = timestamp.subsec_nanosecond();
+    let precision = if nanos == 0 {
+        0
+    } else if nanos % 1_000_000 == 0 {
+        3
+    } else if nanos % 1_000 == 0 {
+        6
+    } else {
+        9
+    };
+    format!(
+        "{:.precision$}",
+        timestamp.display_with_offset(jiff::tz::Offset::UTC)
+    )
+}
 
 /// Map an internal storage failure onto the store error surface.
 ///
@@ -141,7 +161,7 @@ impl TrajectoryStore {
                 trajectory_id TEXT NOT NULL,
                 agent_id TEXT NOT NULL,
                 agent_provider TEXT NOT NULL,
-                -- RFC 3339, always written from a UTC `DateTime` so the offset
+                -- RFC 3339, always written from a UTC timestamp so the offset
                 -- is a constant `+00:00`. That is what lets ORDER BY / MIN /
                 -- MAX compare these lexicographically and still be
                 -- chronological; a mixed-offset writer would silently break
@@ -389,11 +409,10 @@ impl TrajectoryStore {
         let causation_id = optional_text(row, base + 9)?;
         let parent_id = optional_text(row, base + 10)?;
 
-        let timestamp = DateTime::parse_from_rfc3339(&timestamp_str)
-            .map(|dt| dt.with_timezone(&Utc))
+        let timestamp = timestamp_str.parse::<Timestamp>()
             .unwrap_or_else(|e| {
                 warn!(event_id = %event_id, error = %e, "Failed to parse timestamp, using current time");
-                Utc::now()
+                Timestamp::now()
             });
 
         let event: sondera_types::TrajectoryEvent = serde_json::from_str(&event_json)
@@ -487,15 +506,8 @@ pub(crate) fn optional_text(row: &turso::Row, index: usize) -> StoreResult<Optio
 
 /// A NULL-aware RFC 3339 timestamp column read. An unparsable stamp reads as
 /// absent rather than failing the whole projection.
-pub(crate) fn optional_timestamp(
-    row: &turso::Row,
-    index: usize,
-) -> StoreResult<Option<DateTime<Utc>>> {
-    Ok(optional_text(row, index)?.and_then(|text| {
-        DateTime::parse_from_rfc3339(&text)
-            .ok()
-            .map(|dt| dt.with_timezone(&Utc))
-    }))
+pub(crate) fn optional_timestamp(row: &turso::Row, index: usize) -> StoreResult<Option<Timestamp>> {
+    Ok(optional_text(row, index)?.and_then(|text| text.parse().ok()))
 }
 
 /// Get the default database path, stored in the same directory as file storage.

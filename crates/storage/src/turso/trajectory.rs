@@ -17,8 +17,8 @@
 //! the wire filter grammar belong to the service edge.
 
 use super::scan;
-use super::{StoreResult, TrajectoryStore, events, store_err};
-use chrono::{DateTime, Utc};
+use super::{StoreResult, TrajectoryStore, events, format_timestamp, store_err};
+use jiff::Timestamp;
 use sondera_types::{
     Event, EventDetail, EventScanResult, Page, Trajectory, TrajectoryEventStream, TrajectoryFilter,
     TrajectoryOrderBy, TrajectoryQuery, TrajectoryReaderWriter, TrajectoryScans, TrajectoryStream,
@@ -50,7 +50,7 @@ fn insert_params(event: &Event) -> StoreResult<[String; 13]> {
         event.trajectory_id.clone(),
         event.agent.id.clone(),
         event.agent.provider.clone(),
-        event.timestamp.to_rfc3339(),
+        format_timestamp(event.timestamp),
         category.to_string(),
         event_type.unwrap_or("").to_string(),
         event_json,
@@ -254,7 +254,7 @@ fn sort_trajectories(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RunFingerprint {
     pub event_count: i64,
-    pub last_event_at: Option<DateTime<Utc>>,
+    pub last_event_at: Option<Timestamp>,
 }
 
 /// Fingerprints for every trajectory, optionally narrowed to one agent.

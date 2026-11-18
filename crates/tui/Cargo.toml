@@ -26,7 +26,6 @@ tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }
 tonic = { workspace = true }
 prost-types = { workspace = true }
 serde_json = { workspace = true }
-chrono = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]

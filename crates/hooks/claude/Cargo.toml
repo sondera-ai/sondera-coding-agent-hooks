@@ -16,7 +16,7 @@ serde_json = "1.0"
 tracing = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util"] }
 dirs = { workspace = true }
-chrono = "0.4"
+jiff = { workspace = true, features = ["serde"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

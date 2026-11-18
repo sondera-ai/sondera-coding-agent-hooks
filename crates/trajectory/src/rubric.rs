@@ -437,7 +437,7 @@ fn render_transcript_event(event_index: usize, event: &Event) -> String {
     let compact = TranscriptPromptEvent {
         event_index,
         event_id: &event.event_id,
-        timestamp: event.timestamp.to_rfc3339(),
+        timestamp: event.timestamp.to_string(),
         agent: TranscriptPromptAgent {
             id: &event.agent.id,
             provider: &event.agent.provider,

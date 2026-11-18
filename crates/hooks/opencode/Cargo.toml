@@ -10,7 +10,7 @@ description = "OpenCode plugin adapter for Sondera Agentic Security Platform"
 sondera-harness-client = { workspace = true }
 sondera-hooks = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
-chrono = { workspace = true }
+jiff = { workspace = true }
 dirs = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

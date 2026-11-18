@@ -1,25 +1,30 @@
 //! Shared DTO wire-format helpers.
 //!
-//! Pure `prost_types` <-> `serde_json` / `chrono` conversions plus the
+//! Pure `prost_types` <-> `serde_json` / `jiff` conversions plus the
 //! proto-event JSON summary. These were moved out of `sondera-types` so the
 //! domain crate stays proto-free.
 
 use crate::harness_v1 as pb;
 use prost_types::Timestamp;
 
-pub fn datetime_to_timestamp(dt: &chrono::DateTime<chrono::Utc>) -> Timestamp {
+pub fn datetime_to_timestamp(dt: &jiff::Timestamp) -> Timestamp {
+    // CONTEXT: Protobuf uses floor seconds and nonnegative nanos, whereas Jiff uses
+    // signed components before the Unix epoch.
+    let nanos = dt.as_nanosecond();
     Timestamp {
-        seconds: dt.timestamp(),
-        nanos: dt.timestamp_subsec_nanos() as i32,
+        seconds: nanos.div_euclid(1_000_000_000) as i64,
+        nanos: nanos.rem_euclid(1_000_000_000) as i32,
     }
 }
 
 /// Convert a proto [`Timestamp`] back into a UTC datetime.
 ///
-/// Returns `None` when the timestamp is out of `chrono`'s representable range.
-pub fn timestamp_to_datetime(ts: &Timestamp) -> Option<chrono::DateTime<chrono::Utc>> {
-    let nanos = u32::try_from(ts.nanos).ok()?;
-    chrono::DateTime::from_timestamp(ts.seconds, nanos)
+/// Returns `None` for invalid nanoseconds or a timestamp outside Jiff's range.
+pub fn timestamp_to_datetime(ts: &Timestamp) -> Option<jiff::Timestamp> {
+    if !(0..1_000_000_000).contains(&ts.nanos) {
+        return None;
+    }
+    jiff::Timestamp::new(ts.seconds, ts.nanos).ok()
 }
 
 /// Format a proto [`Timestamp`] as an RFC 3339 string.
@@ -27,7 +32,7 @@ pub fn timestamp_to_datetime(ts: &Timestamp) -> Option<chrono::DateTime<chrono::
 /// Returns an empty string if the timestamp cannot be converted.
 pub fn format_timestamp(ts: &Timestamp) -> String {
     timestamp_to_datetime(ts)
-        .map(|dt| dt.to_rfc3339())
+        .map(|dt| dt.display_with_offset(jiff::tz::Offset::UTC).to_string())
         .unwrap_or_default()
 }
 

@@ -4,7 +4,7 @@
 //! Uses byte-offset cursors per session to avoid re-sending messages
 //! across multiple stop hook invocations.
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::Deserialize;
 use sondera_hooks::error::Result;
 use std::borrow::Cow;
@@ -31,7 +31,7 @@ const CURSOR_PRUNE_MARKER: &str = ".last_prune";
 struct TranscriptLine {
     #[serde(rename = "type")]
     line_type: String,
-    timestamp: DateTime<Utc>,
+    timestamp: Timestamp,
     #[serde(default)]
     uuid: String,
     #[serde(default)]
@@ -52,7 +52,7 @@ struct MessagePayload {
 
 /// A trajectory event extracted from a transcript line, preserving its original timestamp.
 pub struct ExtractedEvent {
-    pub timestamp: DateTime<Utc>,
+    pub timestamp: Timestamp,
     pub event: TrajectoryEvent,
     pub uuid: String,
     pub cursor_after_line: u64,
@@ -645,7 +645,7 @@ mod tests {
 
         let (events, _) = parse_transcript(&path, 0).unwrap();
         assert_eq!(events.len(), 1);
-        let expected: DateTime<Utc> = "2026-02-11T19:08:42.922Z".parse().unwrap();
+        let expected: Timestamp = "2026-02-11T19:08:42.922Z".parse().unwrap();
         assert_eq!(events[0].timestamp, expected);
     }
 

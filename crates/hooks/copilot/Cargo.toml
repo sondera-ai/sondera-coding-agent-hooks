@@ -15,7 +15,7 @@ serde_json = "1.0"
 tracing = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 uuid = { version = "1.0", features = ["v4"] }
-chrono = "0.4"
+jiff = { workspace = true }
 dirs = { workspace = true }
 
 [dev-dependencies]
