@@ -43,10 +43,12 @@ use turso::{Builder, Connection, Database};
 
 pub(crate) type StoreResult<T> = std::result::Result<T, StoreError>;
 
-/// Preserve the ledger's UTC offset and fractional precision across writers.
+/// Format a timestamp for Turso writes and SQL queries.
 pub(crate) fn format_timestamp(timestamp: Timestamp) -> String {
-    // CONTEXT: existing rows use Chrono's 0/3/6/9 fractional digits and +00:00.
-    // Changing their representation would change SQL ordering and equality.
+    // Turso sorts timestamps as text. If an existing row says
+    // 12:00:00.900+00:00 and we write 12:00:00.9+00:00 for the same time,
+    // the new row sorts first. When the strings match, Turso uses the row
+    // ID to put the row we inserted earlier first.
     let nanos = timestamp.subsec_nanosecond();
     let precision = if nanos == 0 {
         0
