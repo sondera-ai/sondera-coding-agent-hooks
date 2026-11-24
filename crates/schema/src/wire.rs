@@ -8,13 +8,11 @@ use crate::harness_v1 as pb;
 use prost_types::Timestamp;
 
 pub fn datetime_to_timestamp(dt: &jiff::Timestamp) -> Timestamp {
-    // CONTEXT: Protobuf uses floor seconds and nonnegative nanos, whereas Jiff uses
-    // signed components before the Unix epoch.
-    let nanos = dt.as_nanosecond();
     Timestamp {
-        seconds: nanos.div_euclid(1_000_000_000) as i64,
-        nanos: nanos.rem_euclid(1_000_000_000) as i32,
+        seconds: dt.as_second(),
+        nanos: dt.subsec_nanosecond(),
     }
+    .normalized()
 }
 
 /// Convert a proto [`Timestamp`] back into a UTC datetime.
