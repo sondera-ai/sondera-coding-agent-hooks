@@ -112,7 +112,7 @@ pub fn sparkline(trajectory_id: &str, events: &[Event]) -> TrajectorySparkline {
         .map(|(pos, (event, kind))| {
             let duration_ms = retained
                 .get(pos + 1)
-                .map(|(next, _)| (next.timestamp - event.timestamp).num_milliseconds())
+                .map(|(next, _)| (next.timestamp - event.timestamp).as_millis() as i64)
                 .unwrap_or_default()
                 .max(0);
             let fold = folds.get(event.event_id.as_str());
@@ -338,7 +338,7 @@ impl From<&TrajectorySparkline> for pb::TrajectorySparkline {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{TimeZone, Utc};
+    use jiff::Timestamp;
     use sondera_types::{
         Actor, Adjudicated, Agent, Causality, Completed, Failed, PolicyMetadata, Prompt, Scanned,
         ShellCommand, Started, Terminated,
@@ -363,7 +363,7 @@ mod tests {
             event_id: format!("event-{index}"),
             trajectory_id: "run-1".to_string(),
             agent: Agent::new("agent-1", "test", ""),
-            timestamp: Utc.timestamp_millis_opt(index * 1_000).unwrap(),
+            timestamp: Timestamp::from_millisecond(index * 1_000).unwrap(),
             event: payload,
             actor: Actor::agent("agent-1"),
             causality: Causality::default(),

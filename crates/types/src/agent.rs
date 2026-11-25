@@ -18,7 +18,7 @@
 
 use crate::error::StoreError;
 use crate::page::Page;
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
 
@@ -78,7 +78,7 @@ pub struct AgentActivity {
     pub agent: Agent,
     pub status: AgentStatus,
     pub health_score: i32,
-    pub last_active_time: Option<DateTime<Utc>>,
+    pub last_active_time: Option<Timestamp>,
     pub runs_today: i32,
     pub deny_rate: f64,
 }

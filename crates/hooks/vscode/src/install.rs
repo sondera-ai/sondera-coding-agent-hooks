@@ -656,11 +656,8 @@ mod tests {
 
     #[test]
     fn test_read_json_object_accepts_jsonc_settings() {
-        let path = std::env::temp_dir().join(format!(
-            "vscode-jsonc-settings-{}-{}.json",
-            std::process::id(),
-            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
-        ));
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
         fs::write(
             &path,
             r#"{
@@ -688,7 +685,5 @@ mod tests {
             parsed["terminal.integrated.env.osx"]["URL"],
             "https://example.test/path"
         );
-
-        let _ = fs::remove_file(path);
     }
 }

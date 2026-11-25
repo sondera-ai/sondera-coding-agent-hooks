@@ -49,7 +49,7 @@ pub fn request_from_opencode_event(kind: &str, payload: Value) -> SidecarRequest
     SidecarRequest {
         id: string_at(&payload, &["id"])
             .or_else(|| string_at(&payload, &["event_id"]))
-            .unwrap_or_else(|| format!("{kind}:{}", chrono::Utc::now().timestamp_micros())),
+            .unwrap_or_else(|| format!("{kind}:{}", jiff::Timestamp::now().as_microsecond())),
         provider: crate::OPENCODE_PROVIDER.to_string(),
         platform: crate::OPENCODE_PLATFORM.to_string(),
         trajectory_id: session_id.clone(),

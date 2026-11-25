@@ -9,7 +9,7 @@ description = "Shared hooks infrastructure for Sondera Agentic Security Platform
 sondera-types = { workspace = true }
 sondera-harness-client = { workspace = true }
 
-chrono = "0.4"
+jiff = { workspace = true }
 dirs = { workspace = true }
 dunce = { workspace = true }
 dotenvy = "0.15"

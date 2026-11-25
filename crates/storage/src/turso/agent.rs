@@ -8,8 +8,8 @@
 //! This module deals in bare agent ids and pre-parsed [`AgentFilter`] clauses.
 //! Resource names and the wire filter grammar belong to the service edge.
 
-use super::{StoreResult, TrajectoryStore, optional_timestamp, store_err};
-use chrono::{DateTime, Duration, NaiveTime, Utc};
+use super::{StoreResult, TrajectoryStore, format_timestamp, optional_timestamp, store_err};
+use jiff::{SignedDuration, Timestamp, tz::TimeZone};
 use sondera_types::{
     Agent, AgentActivity, AgentFilter, AgentOrderBy, AgentQuery, AgentReaderWriter, AgentStats,
     AgentStatus, Control, Decision, Page, TrajectoryEvent,
@@ -17,12 +17,12 @@ use sondera_types::{
 use tracing::debug;
 
 /// How long an agent may be silent before it reads as offline.
-const OFFLINE_AFTER: Duration = Duration::hours(24);
+const OFFLINE_AFTER: SignedDuration = SignedDuration::from_hours(24);
 
 /// The window the deny rate is computed over. A rate over all recorded history
 /// would never recover from an old block, which is the opposite of what a
 /// liveness signal is for.
-const DENY_RATE_WINDOW: Duration = Duration::hours(24);
+const DENY_RATE_WINDOW: SignedDuration = SignedDuration::from_hours(24);
 
 /// Deny rate above which an agent reads as degraded rather than healthy.
 const DEGRADED_DENY_RATE: f64 = 0.3;
@@ -128,7 +128,7 @@ impl TrajectoryStore {
     /// refreshes the harness-owned provider/platform, so a hook that reports on
     /// every event costs one upsert rather than churning identity.
     pub(crate) async fn register_agent(&self, agent: &Agent) -> StoreResult<()> {
-        let now = Utc::now().to_rfc3339();
+        let now = format_timestamp(Timestamp::now());
         self.connection()?
             .execute(
                 r#"
@@ -216,7 +216,7 @@ impl TrajectoryStore {
     }
 
     /// Timestamp of the agent's most recent event, if it has produced any.
-    async fn agent_last_active(&self, id: &str) -> StoreResult<Option<DateTime<Utc>>> {
+    async fn agent_last_active(&self, id: &str) -> StoreResult<Option<Timestamp>> {
         let mut rows = self
             .connection()?
             .query(
@@ -238,11 +238,13 @@ impl TrajectoryStore {
 
     /// Distinct trajectories the agent has touched since UTC midnight.
     async fn agent_runs_today(&self, id: &str) -> StoreResult<i32> {
-        let midnight = Utc::now()
-            .date_naive()
-            .and_time(NaiveTime::MIN)
-            .and_utc()
-            .to_rfc3339();
+        let midnight = format_timestamp(
+            Timestamp::now()
+                .to_zoned_datetime(TimeZone::UTC)
+                .start_of_day()
+                .map_err(|e| store_err("Failed to compute UTC midnight", e))?
+                .timestamp(),
+        );
 
         let mut rows = self
             .connection()?
@@ -274,7 +276,7 @@ impl TrajectoryStore {
     /// `0.0` when nothing has been adjudicated in the window — an idle agent is
     /// not a blocked one.
     async fn agent_deny_rate(&self, id: &str) -> StoreResult<f64> {
-        let cutoff = (Utc::now() - DENY_RATE_WINDOW).to_rfc3339();
+        let cutoff = format_timestamp(Timestamp::now() - DENY_RATE_WINDOW);
 
         let mut rows = self
             .connection()?
@@ -345,11 +347,11 @@ fn health_score(deny_rate: f64) -> i32 {
 /// The liveness dot: silence past [`OFFLINE_AFTER`] reads as offline regardless
 /// of how clean the agent's record is, since a stale rate says nothing about
 /// what the agent is doing now.
-fn status(last_active: Option<DateTime<Utc>>, deny_rate: f64) -> AgentStatus {
+fn status(last_active: Option<Timestamp>, deny_rate: f64) -> AgentStatus {
     let Some(last_active) = last_active else {
         return AgentStatus::Offline;
     };
-    if Utc::now() - last_active > OFFLINE_AFTER {
+    if Timestamp::now() - last_active > OFFLINE_AFTER {
         return AgentStatus::Offline;
     }
     if deny_rate > DEGRADED_DENY_RATE {
@@ -374,7 +376,6 @@ fn sort_agents(agents: &mut [AgentActivity], order_by: AgentOrderBy, descending:
 mod tests {
     use super::*;
     use crate::turso::tests::{test_agent, test_event};
-    use chrono::TimeZone;
     use sondera_types::{
         Action, Adjudicated, Event, Observation, ShellCommand, Thought, TrajectoryEvent,
         TrajectoryReaderWriter,
@@ -695,7 +696,7 @@ mod tests {
     #[tokio::test]
     async fn a_tie_within_one_millisecond_resolves_by_insertion_order() {
         let store = TrajectoryStore::open_in_memory().await.unwrap();
-        let at = chrono::Utc.timestamp_millis_opt(1_700_000_000_000).unwrap();
+        let at = Timestamp::from_millisecond(1_700_000_000_000).unwrap();
 
         // Same agent, same instant, three runs: the last one inserted wins.
         for run in ["run-a", "run-b", "run-c"] {
@@ -711,7 +712,7 @@ mod tests {
             "run-old",
             TrajectoryEvent::Observation(Observation::Thought(Thought::new("old"))),
         );
-        stale.timestamp = at - chrono::Duration::seconds(60);
+        stale.timestamp = at - SignedDuration::from_secs(60);
         store.insert_event(&stale).await.unwrap();
 
         assert_eq!(

@@ -79,11 +79,12 @@ fn deserialize_flexible_timestamp<'de, D>(deserializer: D) -> std::result::Resul
 where
     D: Deserializer<'de>,
 {
-    use chrono::{DateTime, Utc};
+    use jiff::Timestamp;
     Ok(match JsonValue::deserialize(deserializer)? {
         JsonValue::Number(n) => n.as_u64().unwrap_or(0),
-        JsonValue::String(s) => DateTime::parse_from_rfc3339(&s)
-            .map(|dt| dt.with_timezone(&Utc).timestamp_millis().max(0) as u64)
+        JsonValue::String(s) => s
+            .parse::<Timestamp>()
+            .map(|dt| dt.as_millisecond().max(0) as u64)
             .unwrap_or(0),
         _ => 0,
     })

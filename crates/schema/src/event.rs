@@ -66,7 +66,7 @@ impl From<AdjudicatedEvent<'_>> for pb::Event {
                 id: value.source_agent_id.to_owned(),
                 ..Default::default()
             }),
-            event_time: Some(datetime_to_timestamp(&chrono::Utc::now())),
+            event_time: Some(datetime_to_timestamp(&jiff::Timestamp::now())),
             actor: Some((&Actor::policy("policy-engine")).into()),
             causality: Some(pb::Causality {
                 correlation_id: value.source_trajectory_id.to_owned(),

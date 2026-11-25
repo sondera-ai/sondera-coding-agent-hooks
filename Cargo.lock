@@ -1952,9 +1952,9 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "form_urlencoded"
-version = "1.2.2"
+version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
+checksum = "afa489199eaffb1211795df1c6236ce1ad0d41a6fa45250add73e3b02420f06e"
 dependencies = [
  "percent-encoding",
 ]
@@ -3083,6 +3083,58 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92ecc6618181def0457392ccd0ee51198e065e016d1d527a7ac1b6dc7c1f09d2"
 
 [[package]]
+name = "jiff"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "107f2e89536b6818514025f6787b0d94d819e54fe3b40365275fc753de485b3f"
+dependencies = [
+ "jiff-core",
+ "jiff-static",
+ "jiff-tzdb-platform",
+ "log",
+ "portable-atomic",
+ "portable-atomic-util",
+ "serde_core",
+ "windows-link",
+]
+
+[[package]]
+name = "jiff-core"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d44c923edf2bf456a982253f1a9ee1f6e89e421dffd0065d9b9a581da0def58f"
+dependencies = [
+ "log",
+]
+
+[[package]]
+name = "jiff-static"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4996f71e569e3a3e32b925c28ef8f0027dc30bb1d594b33eeda409eea185f5c8"
+dependencies = [
+ "jiff-core",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.3",
+]
+
+[[package]]
+name = "jiff-tzdb"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12e71a1b68a875a44a33bb7a1dd84392cb77145a3367a552a3cfe6a4f5cf3afc"
+
+[[package]]
+name = "jiff-tzdb-platform"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc65b284afcfa8f6cf189c7274c805505314a7ab975c60e1f548bff56525420e"
+dependencies = [
+ "jiff-tzdb",
+]
+
+[[package]]
 name = "jni"
 version = "0.22.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4192,6 +4244,15 @@ name = "portable-atomic"
 version = "1.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d20d5497ef88037a52ff98267d066e7f11fcc5e99bbfbd58a42336193aacec3"
+
+[[package]]
+name = "portable-atomic-util"
+version = "0.2.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10ab3eb7f3becc3a1cbc4f2c6f20267996cfc1a6467a873763411b136a122715"
+dependencies = [
+ "portable-atomic",
+]
 
 [[package]]
 name = "postcard"
@@ -5986,9 +6047,9 @@ dependencies = [
 name = "sondera-claude"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "clap",
  "dirs 5.0.1",
+ "jiff",
  "libc",
  "serde",
  "serde_json",
@@ -6022,8 +6083,8 @@ dependencies = [
 name = "sondera-console"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "futures-core",
+ "jiff",
  "serde",
  "sondera-schema",
  "sondera-storage",
@@ -6037,9 +6098,9 @@ dependencies = [
 name = "sondera-copilot"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "clap",
  "dirs 5.0.1",
+ "jiff",
  "serde",
  "serde_json",
  "sondera-harness",
@@ -6083,7 +6144,6 @@ dependencies = [
 name = "sondera-harness"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "serde",
  "serde_json",
  "sondera-cedar-policy",
@@ -6120,11 +6180,11 @@ dependencies = [
 name = "sondera-hooks"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "dirs 5.0.1",
  "dotenvy",
  "dunce",
  "futures-util",
+ "jiff",
  "proptest",
  "serde",
  "serde_json",
@@ -6160,7 +6220,7 @@ name = "sondera-mcp"
 version = "0.1.0"
 dependencies = [
  "cedar-policy",
- "chrono",
+ "jiff",
  "rmcp",
  "schemars 1.2.1",
  "serde",
@@ -6181,9 +6241,9 @@ dependencies = [
 name = "sondera-opencode"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "clap",
  "dirs 5.0.1",
+ "jiff",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -6243,7 +6303,7 @@ dependencies = [
 name = "sondera-schema"
 version = "0.1.0"
 dependencies = [
- "chrono",
+ "jiff",
  "prost",
  "prost-types",
  "protoc-bin-vendored",
@@ -6287,9 +6347,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "cedar-policy",
- "chrono",
  "dirs 5.0.1",
  "futures-core",
+ "jiff",
  "serde",
  "serde_json",
  "sondera-types",
@@ -6317,7 +6377,6 @@ dependencies = [
 name = "sondera-tui"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "clap",
  "color-eyre",
  "crossterm",
@@ -6339,9 +6398,9 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "cedar-policy",
- "chrono",
  "clap",
  "futures-core",
+ "jiff",
  "rstest",
  "schemars 1.2.1",
  "serde",
@@ -6360,7 +6419,6 @@ dependencies = [
 name = "sondera-vscode"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "clap",
  "dirs 5.0.1",
  "serde",
@@ -7604,9 +7662,9 @@ checksum = "6d49784317cd0d1ee7ec5c716dd598ec5b4483ea832a2dced265471cc0f690ae"
 
 [[package]]
 name = "url"
-version = "2.5.8"
+version = "2.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
+checksum = "f00cd2407bb42c0ef17be88d4cf020f5cceffd121665bac9b8b9493a369b3b1a"
 dependencies = [
  "form_urlencoded",
  "idna",

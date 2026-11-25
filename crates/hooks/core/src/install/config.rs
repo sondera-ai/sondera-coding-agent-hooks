@@ -21,7 +21,9 @@ use crate::error::{HookError, HookResultExt as _, Result};
 /// collide and silently discard the first backup.
 #[must_use]
 pub fn backup_timestamp() -> String {
-    chrono::Local::now().format("%Y%m%d_%H%M%S_%3f").to_string()
+    jiff::ZonedDateTime::now()
+        .strftime("%Y%m%d_%H%M%S_%3f")
+        .to_string()
 }
 
 /// Copy `path` to a timestamped sibling before it is rewritten.

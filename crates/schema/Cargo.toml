@@ -11,7 +11,7 @@ crate-type = ["rlib"]
 
 [dependencies]
 sondera-types = { workspace = true }
-chrono = { workspace = true }
+jiff = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
 serde_json = { workspace = true }

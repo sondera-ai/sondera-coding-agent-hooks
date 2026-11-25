@@ -27,7 +27,7 @@ serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 # The sparkline tests build event fixtures at fixed timestamps.
-chrono = { workspace = true }
+jiff = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "net", "time"] }
 
 [lints]

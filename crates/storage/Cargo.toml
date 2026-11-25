@@ -20,7 +20,7 @@ cedar = ["dep:cedar-policy"]
 [dependencies]
 sondera-types = { workspace = true }
 anyhow = "1.0"
-chrono = { workspace = true, features = ["serde"] }
+jiff = { workspace = true }
 dirs = { workspace = true }
 futures-core = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

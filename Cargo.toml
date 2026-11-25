@@ -90,7 +90,7 @@ tracing = "0.1"
 tokio = { version = "1.40", features = ["full"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 dirs = "5.0"
-chrono = "0.4"
+jiff = "1.0.3"
 sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
