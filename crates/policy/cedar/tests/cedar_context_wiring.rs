@@ -167,6 +167,144 @@ async fn shell_command_context_reaches_the_structural_parse_policy() {
     );
 }
 
+/// Base64 and OpenSSL base64 invocations must be denied by the structured
+/// command policy, while prose mentioning the tool and help queries remain
+/// allowed. This also pins that wrappers and pipelines reach the parsed
+/// command programs used by the policy.
+#[tokio::test]
+async fn shell_command_context_reaches_base64_staging_policy() {
+    let (harness, _temp) = load().await;
+    let mut failures = Vec::new();
+    let dangerous = [
+        ("base64 secrets.txt", "base64 file argument"),
+        (
+            "base64 --help; base64 ordinary.txt",
+            "help cannot exempt another encoder",
+        ),
+        (
+            "base64 ordinary.txt; base64 -d encoded.txt",
+            "decode cannot exempt another encoder",
+        ),
+        (
+            "base64 --help | base64 ordinary.txt",
+            "pipeline invocation isolation",
+        ),
+        (
+            "bash -c 'base64 --help; base64 ordinary.txt'",
+            "nested shell invocation isolation",
+        ),
+        (
+            "base64 --help; sudo base64 ordinary.txt",
+            "wrapper invocation isolation",
+        ),
+        (
+            "openssl --help; openssl base64 -in ordinary.txt",
+            "OpenSSL help cannot exempt base64",
+        ),
+        (
+            "openssl enc --help; openssl enc -a -in ordinary.txt",
+            "OpenSSL help cannot exempt enc",
+        ),
+        (
+            "base64 $(base64 --help)",
+            "nested help cannot exempt outer encoder",
+        ),
+        (
+            "base64 -- --help",
+            "help after positional terminator is data",
+        ),
+        (
+            "eval 'base64 --help; base64 ordinary.txt'",
+            "eval invocation isolation",
+        ),
+        (
+            "openssl base64 -in ordinary.txt; openssl version",
+            "unrelated OpenSSL version query",
+        ),
+        ("cat secrets.txt | base64", "base64 pipeline"),
+        (
+            "openssl enc -base64 -in secrets.txt",
+            "openssl enc base64 mode",
+        ),
+        (
+            "openssl base64 -in secrets.txt",
+            "openssl base64 subcommand",
+        ),
+    ];
+
+    for (command, label) in dangerous {
+        let event = Event::new(
+            test_agent(),
+            format!("traj-shell-base64-{label}"),
+            TrajectoryEvent::Action(Action::ShellCommand(ShellCommand::new(command))),
+        );
+        let out = harness
+            .adjudicate(event)
+            .await
+            .expect("adjudicate base64 staging command");
+
+        if out.reason.is_some()
+            || out.decision != Decision::Deny
+            || !out
+                .metadata
+                .iter()
+                .any(|m| m.policy_id.as_deref() == Some("lol-forbid-base64-encode-files"))
+        {
+            failures.push(format!("{label}: {command}: {out:?}"));
+        }
+    }
+
+    for (command, label) in [
+        ("echo 'base64 secrets.txt'", "prose mentioning base64"),
+        ("base64 --help", "base64 help query"),
+        ("base64 --version", "base64 version query"),
+        ("base64 --decode encoded.txt", "base64 long decode query"),
+        ("openssl --help", "OpenSSL help query"),
+        ("openssl version", "OpenSSL version subcommand"),
+        (
+            "openssl rand -base64 16",
+            "unrelated OpenSSL random generator",
+        ),
+        (
+            "base64 -d encoded.txt; base64 --help",
+            "separate safe base64 invocations",
+        ),
+        (
+            "openssl base64 --help; openssl enc --help",
+            "separate OpenSSL help invocations",
+        ),
+        (
+            "openssl rand -base64 16; openssl enc -aes-256-cbc",
+            "flags do not cross OpenSSL subcommands",
+        ),
+    ] {
+        let event = Event::new(
+            test_agent(),
+            format!("traj-shell-base64-near-miss-{label}"),
+            TrajectoryEvent::Action(Action::ShellCommand(ShellCommand::new(command))),
+        );
+        let out = harness
+            .adjudicate(event)
+            .await
+            .expect("adjudicate base64 near miss");
+
+        if out.reason.is_some()
+            || out.decision != Decision::Allow
+            || out
+                .metadata
+                .iter()
+                .any(|m| m.policy_id.as_deref() == Some("lol-forbid-base64-encode-files"))
+        {
+            failures.push(format!("{label}: {command}: {out:?}"));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "base64 policy mismatches:\n{}",
+        failures.join("\n")
+    );
+}
+
 /// Reading an SSH private key must be denied by `lol-forbid-read-ssh-private-keys`,
 /// which matches on `context.path_normalized`. A Deny attributed to that policy
 /// proves the required normalized-path field was emitted.

@@ -181,6 +181,9 @@ pub(crate) struct ShellParse {
     /// Normalized path components from literal positional args, scoped per
     /// program as `"program:component"` for anchored directory/file matching.
     program_arg_path_components_normalized: BTreeSet<String>,
+    /// Recognized literal command modes, classified BEFORE merging invocations.
+    /// Unlike program_flags/program_args, an exemption cannot cross commands.
+    command_modes: BTreeSet<String>,
     /// An expansion/substitution appears in a command-NAME position.
     has_dynamic_command: bool,
     has_command_substitution: bool,
@@ -194,6 +197,7 @@ impl ShellParse {
     pub(crate) fn to_cedar_json(&self) -> serde_json::Value {
         serde_json::json!({
             "ok": self.ok,
+            "command_modes": self.command_modes.iter().collect::<Vec<_>>(),
             "programs": self.programs.iter().collect::<Vec<_>>(),
             "program_flags": self.program_flags.iter().collect::<Vec<_>>(),
             "program_flags_normalized": self.program_flags_normalized.iter().collect::<Vec<_>>(),
@@ -212,6 +216,7 @@ impl ShellParse {
     fn merge(&mut self, other: ShellParse) {
         self.ok &= other.ok;
         self.programs.extend(other.programs);
+        self.command_modes.extend(other.command_modes);
         self.program_flags.extend(other.program_flags);
         self.program_flags_normalized
             .extend(other.program_flags_normalized);
@@ -441,12 +446,46 @@ fn classify_args(
     out: &mut ShellScan,
 ) {
     let mut positional_only = false;
+    // Keep literal facts local until mode classification. Nested substitutions
+    // are scanned into `out`, so their flags cannot become the outer command's
+    // help/decode exemption. All historical aggregate fields remain unions.
+    let mut invocation = ShellScan {
+        parse: ShellParse {
+            ok: true,
+            ..Default::default()
+        },
+    };
     for (idx, arg) in args.iter().enumerate() {
         if Some(idx) == skip {
             continue;
         }
-        classify_arg(prog, *arg, walk, out, &mut positional_only);
+        if literal_text(*arg, walk.src).is_some() {
+            classify_arg(prog, *arg, walk, &mut invocation, &mut positional_only);
+        } else {
+            classify_arg(prog, *arg, walk, out, &mut positional_only);
+        }
     }
+    record_command_mode(prog, &mut invocation.parse);
+    out.merge(invocation);
+}
+
+/// Syntactic modes needed where Cedar's aggregate sets cannot express a
+/// per-invocation predicate. These are facts, not authorization decisions.
+/// Keep OpenSSL's existing base64-operation semantics (including -d); only
+/// the standalone base64 utility has a decode exemption in the shipped rule.
+fn record_command_mode(prog: &str, invocation: &mut ShellParse) {
+    let flag = |f: &str| invocation.program_flags.contains(&format!("{prog}:{f}"));
+    let arg = |a: &str| invocation.program_args.contains(&format!("{prog}:{a}"));
+    let mode = match prog {
+        "base64" if flag("-h") || flag("--help") || flag("--version") => "base64:query",
+        "base64" if flag("-d") || flag("--decode") => "base64:decode",
+        "base64" => "base64:encode",
+        "openssl" if flag("-h") || flag("--help") || flag("--version") => "openssl:query",
+        "openssl" if arg("base64") => "openssl:base64",
+        "openssl" if arg("enc") && (flag("-a") || flag("-base64")) => "openssl:enc-base64",
+        _ => return,
+    };
+    invocation.command_modes.insert(mode.to_owned());
 }
 
 /// Classify a single argument node under `prog` per the extraction rules:
@@ -1607,6 +1646,103 @@ mod tests {
         let r = p(&big);
         assert!(!r.ok);
         assert!(r.programs.is_empty());
+    }
+
+    #[test]
+    fn command_modes_do_not_mix_invocations_or_nested_substitutions() {
+        let parsed = p(
+            "base64 --help; base64 $(base64 -d encoded.txt); openssl rand -base64 16; openssl enc -aes-256-cbc",
+        );
+        assert!(parsed.ok);
+        assert_eq!(
+            parsed.command_modes,
+            BTreeSet::from([
+                "base64:query".to_owned(),
+                "base64:encode".to_owned(),
+                "base64:decode".to_owned(),
+            ])
+        );
+        // The historical aggregate fields deliberately retain their meaning.
+        assert!(parsed.program_flags.contains("base64:--help"));
+        assert!(parsed.program_flags.contains("base64:-d"));
+        assert!(parsed.program_flags.contains("openssl:-base64"));
+        assert!(parsed.program_args.contains("openssl:enc"));
+        assert!(parsed.has_command_substitution);
+        assert_eq!(
+            p("base64 -- --help").command_modes,
+            BTreeSet::from(["base64:encode".to_owned()])
+        );
+    }
+
+    #[test]
+    fn command_modes_are_optional_and_legacy_policy_contexts_still_work() {
+        use cedar_policy::{
+            Authorizer, Context, Decision, Entities, PolicySet, Request, Schema, ValidationMode,
+            Validator,
+        };
+        let schema_source = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../.sondera/policies/cedar/base.cedarschema"
+        ));
+        let policy_source = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../.sondera/policies/cedar/lol-forbid-base64-encode-files.cedar"
+        ));
+        let policies: PolicySet = format!("permit(principal, action, resource);\n{policy_source}")
+            .parse()
+            .unwrap();
+        let (full_schema, _) = Schema::from_cedarschema_str(schema_source).unwrap();
+        let validation = Validator::new(full_schema).validate(&policies, ValidationMode::Strict);
+        assert!(
+            validation.validation_passed(),
+            "{:?}",
+            validation.validation_errors().collect::<Vec<_>>()
+        );
+        // Exercise the actual shipped ShellParseContext declaration without
+        // unrelated classifier/workspace fields obscuring this compatibility test.
+        let start = schema_source.find("type ShellParseContext = {").unwrap();
+        let end = start + schema_source[start..].find("\n};").unwrap() + 3;
+        let fragment = format!(
+            "namespace Sondera {{ {} entity Subject; action \"ShellCommand\" appliesTo {{ principal: [Subject], resource: [Subject], context: {{ parse: ShellParseContext }} }}; }}",
+            &schema_source[start..end]
+        );
+        let (schema, _) = Schema::from_cedarschema_str(&fragment).unwrap();
+        let action = "Sondera::Action::\"ShellCommand\"".parse().unwrap();
+        for (command, expected) in [
+            ("base64 ordinary.txt", Decision::Deny),
+            ("base64 --help", Decision::Allow),
+            ("base64 -d encoded.txt", Decision::Allow),
+            ("openssl enc -base64 -in ordinary.txt", Decision::Deny),
+            ("openssl base64 --help", Decision::Allow),
+        ] {
+            for legacy in [false, true] {
+                let mut parse = p(command).to_cedar_json();
+                if legacy {
+                    parse.as_object_mut().unwrap().remove("command_modes");
+                }
+                let context = Context::from_json_value(
+                    serde_json::json!({"parse": parse}),
+                    Some((&schema, &action)),
+                )
+                .unwrap();
+                let request = Request::new(
+                    "Sondera::Subject::\"a\"".parse().unwrap(),
+                    action.clone(),
+                    "Sondera::Subject::\"r\"".parse().unwrap(),
+                    context,
+                    Some(&schema),
+                )
+                .unwrap();
+                let response =
+                    Authorizer::new().is_authorized(&request, &policies, &Entities::empty());
+                assert_eq!(
+                    response.diagnostics().errors().count(),
+                    0,
+                    "{command}, legacy={legacy}"
+                );
+                assert_eq!(response.decision(), expected, "{command}, legacy={legacy}");
+            }
+        }
     }
 
     #[test]

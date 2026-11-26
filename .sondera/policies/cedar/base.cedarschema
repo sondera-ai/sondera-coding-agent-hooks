@@ -217,6 +217,16 @@ type ShellParseContext = {
     // program as `"program:component"`. This supports anchored credential-dir
     // checks such as `cat:.aws` without matching `.awsome-config`.
     program_arg_path_components_normalized: Set<String>,
+    // Invocation-local syntactic modes, unioned only after classification:
+    // base64:encode, base64:decode, base64:query; openssl:base64,
+    // openssl:enc-base64, openssl:query. Other commands emit no modes.
+    // Query means this invocation has -h/--help/--version; base64 decode
+    // means -d/--decode. OpenSSL base64 modes retain the rule's historical
+    // inclusion of decode operations. This is not a file-content/data-flow
+    // analysis. Dynamic argument values are omitted, like program_args.
+    // Optional for compatibility with pre-mode context producers. Modern
+    // producers always emit the field, even when the set is empty.
+    command_modes?: Set<String>,
     // True iff an expansion/substitution appears in a command-NAME
     // position (e.g. `$TOOL --flag`, `$(which rm) -rf`). Such commands
     // get no program scoping — treat conservatively.
